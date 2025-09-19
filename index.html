@@ -142,6 +142,7 @@
         let isConnecting = false;
         let isPanning = false;
         let isSelecting = false;
+        let isRotating = false;
         
         let lastMousePos = { x: 0, y: 0 };
         let resizeHandle = null;
@@ -229,7 +230,15 @@
         }
 
         function drawShape(shape) {
+            const centerX = shape.x + shape.width / 2;
+            const centerY = shape.y + shape.height / 2;
+
             ctx.save();
+            // Translate context to shape center, rotate, and translate back
+            ctx.translate(centerX, centerY);
+            ctx.rotate(shape.rotation || 0);
+            ctx.translate(-centerX, -centerY);
+
             ctx.globalAlpha = shape.opacity || 1;
             ctx.strokeStyle = shape.borderColor;
             ctx.fillStyle = shape.fillColor;
@@ -367,15 +376,32 @@
         function drawHandles(shape) {
             const handles = getResizeHandles(shape);
             const connectionPoints = getConnectionPoints(shape);
+            const rotationHandle = getRotationHandle(shape);
+
             const handleSize = 8 / cameraZoom;
             const connectionPointSize = 5 / cameraZoom;
             
+            // Rotation handle line
+            ctx.strokeStyle = '#007bff';
+            ctx.lineWidth = 1 / cameraZoom;
+            ctx.beginPath();
+            ctx.moveTo(shape.x + shape.width / 2, shape.y);
+            ctx.lineTo(rotationHandle.x, rotationHandle.y);
+            ctx.stroke();
+
+            // Rotation handle circle
             ctx.fillStyle = '#007bff';
+            ctx.beginPath();
+            ctx.arc(rotationHandle.x, rotationHandle.y, handleSize / 2, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Resize handles
             for (const handle in handles) {
                 const pos = handles[handle];
                 ctx.fillRect(pos.x - handleSize / 2, pos.y - handleSize / 2, handleSize, handleSize);
             }
             
+            // Connection points
             ctx.fillStyle = '#28a745';
             for(const point in connectionPoints){
                 const pos = connectionPoints[point];
@@ -531,6 +557,10 @@
             
             if (selectedItems.length === 1) {
                 const shape = selectedItems[0];
+                if (getRotationHandleAt(mousePos, shape)) {
+                    isRotating = true;
+                    return;
+                }
                 const connectionPoint = getConnectionPointAt(mousePos, shape);
                 if(connectionPoint){
                     isConnecting = true;
@@ -568,6 +598,16 @@
         function handleMouseMove(e) {
             const mousePos = getEventPos(e);
 
+            if (isRotating) {
+                const shape = selectedItems[0];
+                const centerX = shape.x + shape.width / 2;
+                const centerY = shape.y + shape.height / 2;
+                const angle = Math.atan2(mousePos.y - centerY, mousePos.x - centerX);
+                shape.rotation = angle + Math.PI / 2; // Offset by 90 deg because handle is on top
+                draw();
+                return;
+            }
+
             if (isReconnecting) { lastMousePos = mousePos; draw(); return; }
             if (draggedWaypointInfo) { draggedWaypointInfo.connector.waypoints[draggedWaypointInfo.waypointIndex] = mousePos; draw(); return; }
 
@@ -580,6 +620,8 @@
 
             if (isResizing) {
                 const shape = selectedItems[0];
+                // This part needs to be improved to handle resizing of rotated shapes correctly.
+                // For now, it will skew the shape. A proper implementation is more complex.
                 let { x, y, width, height } = shape;
                 if (resizeHandle.includes('right')) width = mousePos.x - x;
                 if (resizeHandle.includes('left')) { width += x - mousePos.x; x = mousePos.x; }
@@ -613,10 +655,12 @@
                 const prevHovered = hoveredConnector;
                 hoveredConnector = getConnectorAt(mousePos);
                 if (prevHovered !== hoveredConnector) draw();
-                if (selectedItems.length === 1) {
-                    const handle = getResizeHandleAt(mousePos, selectedItems[0]);
+                 if (selectedItems.length === 1) {
+                    const shape = selectedItems[0];
+                    if (getRotationHandleAt(mousePos, shape)) { canvas.style.cursor = 'crosshair'; return; }
+                    const handle = getResizeHandleAt(mousePos, shape);
                     if(handle) { canvas.style.cursor = getResizeCursor(handle); return; }
-                    if(getConnectionPointAt(mousePos, selectedItems[0])){ canvas.style.cursor = 'crosshair'; return; }
+                    if(getConnectionPointAt(mousePos, shape)){ canvas.style.cursor = 'crosshair'; return; }
                 }
                 canvas.style.cursor = hoveredConnector ? 'pointer' : (getShapeAt(mousePos) ? 'move' : 'default');
             }
@@ -636,7 +680,7 @@
                         const points = getConnectionPoints(endShape);
                         let minDist = Infinity;
                         for (const pointName in points) {
-                            const pointPos = points[pointName];
+                            const pointPos = getAttachPoint(endShape, pointName); // Get rotated point
                             const dist = Math.hypot(mousePos.x - pointPos.x, mousePos.y - pointPos.y);
                             if (dist < minDist) { minDist = dist; endPoint = pointName; }
                         }
@@ -654,7 +698,7 @@
                     const points = getConnectionPoints(endShape);
                     let minDist = Infinity;
                     for (const pointName in points) {
-                        const pointPos = points[pointName];
+                        const pointPos = getAttachPoint(endShape, pointName); // Get rotated point
                         const dist = Math.hypot(mousePos.x - pointPos.x, mousePos.y - pointPos.y);
                         if (dist < minDist) { minDist = dist; endPoint = pointName; }
                     }
@@ -684,6 +728,7 @@
             isResizing = false; 
             isConnecting = false; 
             isSelecting = false;
+            isRotating = false;
             currentConnector = null; 
             selectionBox = { x: 0, y: 0, width: 0, height: 0 };
             draw();
@@ -765,7 +810,7 @@
                 text: 'New Shape', textColor: '#ffffff', fontSize: 14,
                 fillColor: '#4a5568', borderColor: '#a0aec0',
                 borderWidth: 2, fill: true, border: true, children: [], parentId: null,
-                borderRadius: 4, opacity: 1,
+                borderRadius: 4, opacity: 1, rotation: 0,
             };
             if(type === 'text'){ newShape.fill = false; newShape.border = false; newShape.text = 'Enter text...'; }
             if(type === 'pie'){ newShape.angle = 90; }
@@ -801,12 +846,14 @@
             textEditor.style.width = `${screenWidth}px`; textEditor.style.height = `${screenHeight}px`;
             textEditor.style.fontSize = `${shape.fontSize * cameraZoom}px`;
             textEditor.style.textAlign = 'center'; textEditor.style.fontFamily = 'Inter';
+            textEditor.style.transform = `rotate(${shape.rotation || 0}rad)`;
             textEditor.focus(); textEditor.select();
         }
 
         function finishTextEdit() {
             if (selectedItems.length === 1) { selectedItems[0].text = textEditor.value; }
             textEditor.style.display = 'none'; textEditor.value = '';
+            textEditor.style.transform = 'rotate(0rad)';
             draw(); updatePropertiesPanel();
         }
 
@@ -839,7 +886,7 @@
                 id: Date.now(), type: 'group', x: minX - padding, y: minY - padding,
                 width: (maxX - minX) + padding * 2, height: (maxY - minY) + padding * 2, text: '',
                 borderColor: '#3498db', borderWidth: 2,
-                fill: false, border: true, children: selectedItems.map(s => s.id), parentId: null
+                fill: false, border: true, children: selectedItems.map(s => s.id), parentId: null, rotation: 0
             };
             selectedItems.forEach(s => s.parentId = groupShape.id);
             shapes.push(groupShape); selectedItems = [groupShape];
@@ -869,7 +916,12 @@
         function getShapeAt(pos) {
             for (let i = shapes.length - 1; i >= 0; i--) {
                 const shape = shapes[i];
-                if (pos.x >= shape.x && pos.x <= shape.x + shape.width && pos.y >= shape.y && pos.y <= shape.y + shape.height) { return shape; }
+                const center = { x: shape.x + shape.width / 2, y: shape.y + shape.height / 2 };
+                const unrotatedPos = rotatePoint(pos, center, -(shape.rotation || 0));
+
+                if (unrotatedPos.x >= shape.x && unrotatedPos.x <= shape.x + shape.width && unrotatedPos.y >= shape.y && unrotatedPos.y <= shape.y + shape.height) { 
+                    return shape; 
+                }
             }
             return null;
         }
@@ -979,6 +1031,10 @@
             }
             return null;
         }
+        
+        function getRotationHandle(shape) {
+            return { x: shape.x + shape.width / 2, y: shape.y - 30 / cameraZoom };
+        }
 
         function getResizeHandles(shape) {
              return {
@@ -997,23 +1053,51 @@
             };
         }
 
+        function getRotationHandleAt(pos, shape) {
+            const center = { x: shape.x + shape.width / 2, y: shape.y + shape.height / 2 };
+            const handlePos = rotatePoint(getRotationHandle(shape), center, shape.rotation || 0);
+            const hitRadius = 10 / cameraZoom;
+            return Math.hypot(pos.x - handlePos.x, pos.y - handlePos.y) < hitRadius;
+        }
+        
         function getResizeHandleAt(pos, shape) {
             const handles = getResizeHandles(shape);
+            const center = { x: shape.x + shape.width / 2, y: shape.y + shape.height / 2 };
             const hitRadius = 14 / cameraZoom;
-            for (const handle in handles) { if (Math.abs(pos.x - handles[handle].x) < hitRadius / 2 && Math.abs(pos.y - handles[handle].y) < hitRadius / 2) return handle; }
+            for (const handle in handles) { 
+                const rotatedHandle = rotatePoint(handles[handle], center, shape.rotation || 0);
+                if (Math.hypot(pos.x - rotatedHandle.x, pos.y - rotatedHandle.y) < hitRadius / 2) return handle; 
+            }
             return null;
         }
 
         function getConnectionPointAt(pos, shape) {
             const points = getConnectionPoints(shape);
+            const center = { x: shape.x + shape.width / 2, y: shape.y + shape.height / 2 };
             const hitRadius = 10 / cameraZoom;
-            for (const point in points) { if (Math.abs(pos.x - points[point].x) < hitRadius / 2 && Math.abs(pos.y - points[point].y) < hitRadius / 2) return point; }
+            for (const point in points) { 
+                const rotatedPoint = rotatePoint(points[point], center, shape.rotation || 0);
+                if (Math.hypot(pos.x - rotatedPoint.x, pos.y - rotatedPoint.y) < hitRadius / 2) return point; 
+            }
             return null;
         }
         
         function getAttachPoint(shape, pointName) {
-            const points = getConnectionPoints(shape);
-            return points[pointName] || {x: shape.x + shape.width/2, y: shape.y + shape.height/2};
+            const unrotatedPoints = getConnectionPoints(shape);
+            const center = { x: shape.x + shape.width / 2, y: shape.y + shape.height / 2 };
+            const unrotatedPoint = unrotatedPoints[pointName] || center;
+            return rotatePoint(unrotatedPoint, center, shape.rotation || 0);
+        }
+
+        function rotatePoint(point, center, angle) {
+            const dx = point.x - center.x;
+            const dy = point.y - center.y;
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            return {
+                x: center.x + dx * cos - dy * sin,
+                y: center.y + dx * sin + dy * cos
+            };
         }
 
         function getResizeCursor(handle) {
@@ -1203,5 +1287,4 @@
     </script>
 </body>
 </html>
-
 
