@@ -1011,7 +1011,7 @@
 
             // Prioritize arrowhead ('to') for dragging
             if (distToEnd < hitRadius) { return { connector, end: 'to' }; }
-            // if (distToStart < hitRadius) { return { connector, end: 'from' }; } // Can enable dragging start point later
+            if (distToStart < hitRadius) { return { connector, end: 'from' }; }
             return null;
         }
 
@@ -1287,4 +1287,5 @@
     </script>
 </body>
 </html>
+
 
