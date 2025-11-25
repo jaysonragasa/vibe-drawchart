@@ -57,6 +57,10 @@
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" y1="20" x2="15" y2="20"></line><line x1="12" y1="4" x2="12" y2="20"></line></svg>
                 <span>Text</span>
             </div>
+            <div id="shape-image" class="shape-palette-item flex items-center space-x-2 p-2 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 hover:shadow-md">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                <span>Image</span>
+            </div>
         </div>
     </aside>
 
@@ -146,6 +150,7 @@
         
         let lastMousePos = { x: 0, y: 0 };
         let resizeHandle = null;
+        let resizeAspectRatio = 1; // Store aspect ratio for proportional resize
         let currentConnector = null;
         let panStart = { x: 0, y: 0 };
         let selectionBox = { x: 0, y: 0, width: 0, height: 0 };
@@ -240,9 +245,14 @@
             ctx.translate(-centerX, -centerY);
 
             ctx.globalAlpha = shape.opacity || 1;
-            ctx.strokeStyle = shape.borderColor;
-            ctx.fillStyle = shape.fillColor;
-            ctx.lineWidth = shape.borderWidth / cameraZoom;
+            
+            // Don't draw default border/fill for text or image unless specified, 
+            // but we do need a bounding box for selection
+            if (shape.type !== 'image') {
+                ctx.strokeStyle = shape.borderColor;
+                ctx.fillStyle = shape.fillColor;
+                ctx.lineWidth = shape.borderWidth / cameraZoom;
+            }
 
             if (selectedItems.includes(shape)) {
                 ctx.shadowColor = 'rgba(0, 123, 255, 0.7)';
@@ -268,6 +278,70 @@
                 case 'text':
                     ctx.beginPath(); ctx.rect(shape.x, shape.y, shape.width, shape.height);
                     break;
+                case 'image':
+                    ctx.beginPath(); 
+                    ctx.rect(shape.x, shape.y, shape.width, shape.height);
+                    if (shape.imageSrc) {
+                        if (!shape.imageElem) {
+                            const img = new Image();
+                            img.onload = () => {
+                                shape.imageElem = img;
+                                draw();
+                            };
+                            img.src = shape.imageSrc;
+                            shape.imageElem = 'loading'; // Prevent multiple loads
+                        } else if (shape.imageElem !== 'loading') {
+                            // Image Fit Logic
+                            const img = shape.imageElem;
+                            const fit = shape.imageFit || 'fill';
+                            const sw = shape.width;
+                            const sh = shape.height;
+                            const iw = img.naturalWidth || img.width;
+                            const ih = img.naturalHeight || img.height;
+
+                            ctx.save(); // Save state for clipping
+                            ctx.clip(); // Clip to the rectangle path defined above
+
+                            if (fit === 'fill') {
+                                ctx.drawImage(img, shape.x, shape.y, sw, sh);
+                            } else if (fit === 'aspectFit') {
+                                const scale = Math.min(sw / iw, sh / ih);
+                                const nw = iw * scale;
+                                const nh = ih * scale;
+                                const ox = (sw - nw) / 2;
+                                const oy = (sh - nh) / 2;
+                                ctx.drawImage(img, shape.x + ox, shape.y + oy, nw, nh);
+                            } else if (fit === 'aspectFill') {
+                                const scale = Math.max(sw / iw, sh / ih);
+                                const nw = iw * scale;
+                                const nh = ih * scale;
+                                const ox = (sw - nw) / 2;
+                                const oy = (sh - nh) / 2;
+                                ctx.drawImage(img, shape.x + ox, shape.y + oy, nw, nh);
+                            } else if (fit === 'center') {
+                                const ox = (sw - iw) / 2;
+                                const oy = (sh - ih) / 2;
+                                ctx.drawImage(img, shape.x + ox, shape.y + oy, iw, ih);
+                            }
+                            ctx.restore(); // Remove clip
+                        }
+                    } else {
+                        // Placeholder
+                        ctx.fillStyle = '#e2e8f0';
+                        if(document.documentElement.classList.contains('dark')) ctx.fillStyle = '#4a5568';
+                        ctx.fill();
+                        ctx.strokeStyle = '#cbd5e0';
+                        ctx.lineWidth = 2 / cameraZoom;
+                        ctx.setLineDash([5 / cameraZoom, 5 / cameraZoom]);
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+                        ctx.fillStyle = '#718096';
+                        ctx.font = `${14 / cameraZoom}px Inter`;
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText('No Image', shape.x + shape.width / 2, shape.y + shape.height / 2);
+                    }
+                    break;
                 case 'checkmark':
                     ctx.strokeStyle = shape.borderColor; ctx.lineWidth = Math.min(shape.width, shape.height) * 0.15; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(shape.x + shape.width * 0.2, shape.y + shape.height * 0.5); ctx.lineTo(shape.x + shape.width * 0.45, shape.y + shape.height * 0.75); ctx.lineTo(shape.x + shape.width * 0.8, shape.y + shape.height * 0.25); ctx.stroke(); ctx.restore(); return;
                 case 'group':
@@ -275,15 +349,25 @@
                     break;
             }
 
-            if (shape.fill) ctx.fill();
-            if (shape.border || (shape.type === 'text' && selectedItems.includes(shape))) ctx.stroke();
+            if (shape.type !== 'image') {
+                if (shape.fill) ctx.fill();
+                if (shape.border || (shape.type === 'text' && selectedItems.includes(shape))) ctx.stroke();
+            } else if (shape.type === 'image' && selectedItems.includes(shape)) {
+                // Draw selection border for image
+                ctx.strokeStyle = '#3b82f6';
+                ctx.lineWidth = 1 / cameraZoom;
+                ctx.stroke();
+            }
             ctx.setLineDash([]);
             
-            ctx.fillStyle = shape.textColor;
-            ctx.font = `${shape.fontSize}px Inter`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            wrapText(ctx, shape.text, shape.x + shape.width / 2, shape.y + shape.height / 2, shape.width - 10, shape.fontSize * 1.2);
+            // Draw text if not image (or if image has text overlay, but usually image replaces text)
+            if (shape.type !== 'image') {
+                ctx.fillStyle = shape.textColor;
+                ctx.font = `${shape.fontSize}px Inter`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                wrapText(ctx, shape.text, shape.x + shape.width / 2, shape.y + shape.height / 2, shape.width - 10, shape.fontSize * 1.2);
+            }
             
             if (selectedItems.length === 1 && selectedItems[0] === shape) {
                 drawHandles(shape);
@@ -568,7 +652,11 @@
                     return;
                 }
                 resizeHandle = getResizeHandleAt(mousePos, shape);
-                if (resizeHandle) { isResizing = true; return; }
+                if (resizeHandle) { 
+                    isResizing = true; 
+                    resizeAspectRatio = shape.width / shape.height; // Store aspect ratio
+                    return; 
+                }
             }
 
             const clickedConnector = getConnectorAt(mousePos);
@@ -620,15 +708,48 @@
 
             if (isResizing) {
                 const shape = selectedItems[0];
-                // This part needs to be improved to handle resizing of rotated shapes correctly.
-                // For now, it will skew the shape. A proper implementation is more complex.
-                let { x, y, width, height } = shape;
-                if (resizeHandle.includes('right')) width = mousePos.x - x;
-                if (resizeHandle.includes('left')) { width += x - mousePos.x; x = mousePos.x; }
-                if (resizeHandle.includes('bottom')) height = mousePos.y - y;
-                if (resizeHandle.includes('top')) { height += y - mousePos.y; y = mousePos.y; }
-                if (width > 20) { shape.x = x; shape.width = width; }
-                if (height > 20) { shape.y = y; shape.height = height; }
+                let newX = shape.x;
+                let newY = shape.y;
+                let newWidth = shape.width;
+                let newHeight = shape.height;
+
+                // Basic axis-aligned resizing logic
+                if (resizeHandle.includes('right')) newWidth = mousePos.x - shape.x;
+                if (resizeHandle.includes('left')) { 
+                    newWidth = shape.width + (shape.x - mousePos.x); 
+                    newX = mousePos.x; 
+                }
+                if (resizeHandle.includes('bottom')) newHeight = mousePos.y - shape.y;
+                if (resizeHandle.includes('top')) { 
+                    newHeight = shape.height + (shape.y - mousePos.y); 
+                    newY = mousePos.y; 
+                }
+
+                // Enforce proportional resizing for corners
+                if (['topLeft', 'topRight', 'bottomLeft', 'bottomRight'].includes(resizeHandle)) {
+                    const currentRatio = newWidth / newHeight;
+                    
+                    if (currentRatio < resizeAspectRatio) {
+                        // Height is driving the size (dragged more vertically), adjust width to match ratio
+                        newWidth = newHeight * resizeAspectRatio;
+                        if (resizeHandle.includes('left')) {
+                            newX = shape.x + (shape.width - newWidth);
+                        }
+                    } else {
+                        // Width is driving the size (dragged more horizontally), adjust height to match ratio
+                        newHeight = newWidth / resizeAspectRatio;
+                        if (resizeHandle.includes('top')) {
+                            newY = shape.y + (shape.height - newHeight);
+                        }
+                    }
+                }
+
+                if (newWidth > 20 && newHeight > 20) { 
+                    shape.x = newX; 
+                    shape.y = newY; 
+                    shape.width = newWidth; 
+                    shape.height = newHeight; 
+                }
                 if(snapToGrid) snapShape(shape);
                 updateChildrenPositions(shape, 0, 0);
                 draw();
@@ -815,6 +936,7 @@
             if(type === 'text'){ newShape.fill = false; newShape.border = false; newShape.text = 'Enter text...'; }
             if(type === 'pie'){ newShape.angle = 90; }
             if(type === 'checkmark'){ newShape.fill = false; newShape.width = 50; newShape.height = 50; newShape.text = ''; }
+            if(type === 'image'){ newShape.text = ''; newShape.imageSrc = null; newShape.imageFit = 'fill'; }
             
             const parentShape = getShapeAt({x, y});
             if(parentShape) { newShape.parentId = parentShape.id; parentShape.children.push(newShape.id); }
@@ -1173,23 +1295,76 @@
                          <button id="prop-send-backward" class="p-2 w-full bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-gray-100 rounded-md hover:bg-gray-300 dark:hover:bg-gray-500 text-sm">Send Backward</button>
                          <button id="prop-send-back" class="p-2 w-full bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-gray-100 rounded-md hover:bg-gray-300 dark:hover:bg-gray-500 text-sm">Send to Back</button>
                     </div>
-                    <hr class="border-gray-300 dark:border-gray-600 my-2">
-                    <div class="space-y-2"><label class="block text-sm font-medium">Text</label><textarea id="prop-text" class="w-full p-1 border rounded-md bg-white dark:bg-gray-700 dark:border-gray-600">${shape.text}</textarea></div> <div class="space-y-2"><label class="block text-sm font-medium">Font Size</label><input type="number" id="prop-font-size" class="w-full p-1 border rounded-md bg-white dark:bg-gray-700 dark:border-gray-600" value="${shape.fontSize}"></div> <div class="space-y-2"><label class="block text-sm font-medium">Text Color</label><input type="color" id="prop-text-color" class="w-full h-8 p-1 border rounded-md" value="${shape.textColor}"></div>`;
-                if (shape.type !== 'text') { 
+                    <hr class="border-gray-300 dark:border-gray-600 my-2">`;
+                
+                if (shape.type === 'image') {
+                    content += `
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium">Image Source</label>
+                            <input type="file" id="prop-image-upload" accept="image/*" class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-gray-700 dark:file:text-gray-200">
+                        </div>
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium">Image Fit</label>
+                            <select id="prop-image-fit" class="w-full p-1 border rounded-md bg-white dark:bg-gray-700 dark:border-gray-600">
+                                <option value="fill" ${!shape.imageFit || shape.imageFit === 'fill' ? 'selected' : ''}>Fill</option>
+                                <option value="aspectFit" ${shape.imageFit === 'aspectFit' ? 'selected' : ''}>Aspect Fit</option>
+                                <option value="aspectFill" ${shape.imageFit === 'aspectFill' ? 'selected' : ''}>Aspect Fill</option>
+                                <option value="center" ${shape.imageFit === 'center' ? 'selected' : ''}>Center</option>
+                            </select>
+                        </div>
+                        <div class="space-y-2"><label class="block text-sm font-medium">Opacity (${Math.round((shape.opacity || 1) * 100)}%)</label><input type="range" id="prop-opacity" min="0" max="1" step="0.05" class="w-full" value="${shape.opacity || 1}"></div>
+                    `;
+                } else {
+                    content += `<div class="space-y-2"><label class="block text-sm font-medium">Text</label><textarea id="prop-text" class="w-full p-1 border rounded-md bg-white dark:bg-gray-700 dark:border-gray-600">${shape.text}</textarea></div> <div class="space-y-2"><label class="block text-sm font-medium">Font Size</label><input type="number" id="prop-font-size" class="w-full p-1 border rounded-md bg-white dark:bg-gray-700 dark:border-gray-600" value="${shape.fontSize}"></div> <div class="space-y-2"><label class="block text-sm font-medium">Text Color</label><input type="color" id="prop-text-color" class="w-full h-8 p-1 border rounded-md" value="${shape.textColor}"></div>`;
+                }
+
+                if (shape.type !== 'text' && shape.type !== 'image') { 
                     content += `<div class="space-y-2"><label class="block text-sm font-medium">Fill Color</label><div class="flex items-center space-x-2"><input type="checkbox" id="prop-fill-toggle" ${shape.fill ? 'checked' : ''}><input type="color" id="prop-fill-color" class="w-full h-8 p-1 border rounded-md" value="${shape.fillColor}"></div></div> <div class="space-y-2"><label class="block text-sm font-medium">Border Color</label><div class="flex items-center space-x-2"><input type="checkbox" id="prop-border-toggle" ${shape.border ? 'checked' : ''}><input type="color" id="prop-border-color" class="w-full h-8 p-1 border rounded-md" value="${shape.borderColor}"></div></div> <div class="space-y-2"><label class="block text-sm font-medium">Border Width</label><input type="number" id="prop-border-width" class="w-full p-1 border rounded-md bg-white dark:bg-gray-700 dark:border-gray-600" value="${shape.borderWidth}"></div>`; 
                     if (shape.type === 'rectangle') { content += `<div class="space-y-2"><label class="block text-sm font-medium">Roundness</label><input type="number" id="prop-border-radius" class="w-full p-1 border rounded-md bg-white dark:bg-gray-700 dark:border-gray-600" value="${shape.borderRadius || 0}" min="0"></div>`; }
                     content += `<div class="space-y-2"><label class="block text-sm font-medium">Opacity (${Math.round((shape.opacity || 1) * 100)}%)</label><input type="range" id="prop-opacity" min="0" max="1" step="0.05" class="w-full" value="${shape.opacity || 1}"></div>`;
                 }
                 if(shape.type === 'pie') { content += `<div class="space-y-2"><label class="block text-sm font-medium">Angle (${shape.angle}°)</label><input type="range" id="prop-angle" min="0" max="360" class="w-full" value="${shape.angle}"></div>`; }
                 propertiesContent.innerHTML = content;
+                
                 document.getElementById('prop-bring-front').addEventListener('click', () => bringToFront(shape));
                 document.getElementById('prop-send-back').addEventListener('click', () => sendToBack(shape));
                 document.getElementById('prop-bring-forward').addEventListener('click', () => bringForward(shape));
                 document.getElementById('prop-send-backward').addEventListener('click', () => sendBackward(shape));
-                document.getElementById('prop-text').addEventListener('input', (e) => { shape.text = e.target.value; draw(); });
-                document.getElementById('prop-font-size').addEventListener('input', (e) => { shape.fontSize = parseInt(e.target.value); draw(); });
-                document.getElementById('prop-text-color').addEventListener('input', (e) => { shape.textColor = e.target.value; draw(); });
-                if (shape.type !== 'text') {
+
+                if (shape.type === 'image') {
+                    const fileInput = document.getElementById('prop-image-upload');
+                    fileInput.addEventListener('change', (e) => {
+                        const file = e.target.files[0];
+                        if (file) {
+                            const reader = new FileReader();
+                            reader.onload = (event) => {
+                                shape.imageSrc = event.target.result;
+                                shape.imageElem = null; // Reset cached image to force reload
+                                draw();
+                            };
+                            reader.readAsDataURL(file);
+                        }
+                    });
+                    const fitInput = document.getElementById('prop-image-fit');
+                    fitInput.addEventListener('change', (e) => {
+                        shape.imageFit = e.target.value;
+                        draw();
+                    });
+                    const opacityInput = document.getElementById('prop-opacity');
+                    if (opacityInput) {
+                        opacityInput.addEventListener('input', (e) => { 
+                            shape.opacity = parseFloat(e.target.value); 
+                            e.target.previousElementSibling.innerText = `Opacity (${Math.round(shape.opacity * 100)}%)`;
+                            draw(); 
+                        });
+                    }
+                } else {
+                    document.getElementById('prop-text').addEventListener('input', (e) => { shape.text = e.target.value; draw(); });
+                    document.getElementById('prop-font-size').addEventListener('input', (e) => { shape.fontSize = parseInt(e.target.value); draw(); });
+                    document.getElementById('prop-text-color').addEventListener('input', (e) => { shape.textColor = e.target.value; draw(); });
+                }
+
+                if (shape.type !== 'text' && shape.type !== 'image') {
                     document.getElementById('prop-fill-color').addEventListener('input', (e) => { shape.fillColor = e.target.value; draw(); });
                     document.getElementById('prop-fill-toggle').addEventListener('change', (e) => { shape.fill = e.target.checked; draw(); });
                     document.getElementById('prop-border-color').addEventListener('input', (e) => { shape.borderColor = e.target.value; draw(); });
@@ -1262,7 +1437,10 @@
             reader.onload = (event) => {
                 try {
                     const data = JSON.parse(event.target.result);
-                    shapes = data.shapes || []; connectors = data.connectors || [];
+                    shapes = data.shapes || []; 
+                    // Reset image elements so they reload from src string
+                    shapes.forEach(s => { if(s.type === 'image') s.imageElem = null; });
+                    connectors = data.connectors || [];
                     cameraOffset = data.cameraOffset || {x: 0, y:0}; cameraZoom = data.cameraZoom || 1;
                     selectedItems = []; selectedConnectors = [];
                     updatePropertiesPanel(); draw();
@@ -1287,5 +1465,3 @@
     </script>
 </body>
 </html>
-
-
