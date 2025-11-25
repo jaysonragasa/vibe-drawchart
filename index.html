@@ -149,8 +149,10 @@
         let isRotating = false;
         
         let lastMousePos = { x: 0, y: 0 };
+        let startMousePos = { x: 0, y: 0 }; // Start pos for drag operations
+        let startShapeState = null; // Store initial state for resizing
         let resizeHandle = null;
-        let resizeAspectRatio = 1; // Store aspect ratio for proportional resize
+        let resizeAspectRatio = 1;
         let currentConnector = null;
         let panStart = { x: 0, y: 0 };
         let selectionBox = { x: 0, y: 0, width: 0, height: 0 };
@@ -165,7 +167,6 @@
         
         let theme = 'dark';
         
-        // Mobile/Touch specific state
         let lastTap = 0;
         let lastTouchDistance = null;
         let isMultiTouching = false;
@@ -196,7 +197,6 @@
             connectors.forEach(c => drawConnector(c));
             shapes.forEach(s => drawShape(s));
 
-            // Draw selection box
             if (isSelecting) {
                 ctx.strokeStyle = 'rgba(52, 152, 219, 0.8)';
                 ctx.fillStyle = 'rgba(52, 152, 219, 0.1)';
@@ -239,15 +239,12 @@
             const centerY = shape.y + shape.height / 2;
 
             ctx.save();
-            // Translate context to shape center, rotate, and translate back
             ctx.translate(centerX, centerY);
             ctx.rotate(shape.rotation || 0);
             ctx.translate(-centerX, -centerY);
 
             ctx.globalAlpha = shape.opacity || 1;
             
-            // Don't draw default border/fill for text or image unless specified, 
-            // but we do need a bounding box for selection
             if (shape.type !== 'image') {
                 ctx.strokeStyle = shape.borderColor;
                 ctx.fillStyle = shape.fillColor;
@@ -284,51 +281,33 @@
                     if (shape.imageSrc) {
                         if (!shape.imageElem) {
                             const img = new Image();
-                            img.onload = () => {
-                                shape.imageElem = img;
-                                draw();
-                            };
+                            img.onload = () => { shape.imageElem = img; draw(); };
                             img.src = shape.imageSrc;
-                            shape.imageElem = 'loading'; // Prevent multiple loads
+                            shape.imageElem = 'loading';
                         } else if (shape.imageElem !== 'loading') {
-                            // Image Fit Logic
                             const img = shape.imageElem;
                             const fit = shape.imageFit || 'fill';
                             const sw = shape.width;
                             const sh = shape.height;
                             const iw = img.naturalWidth || img.width;
                             const ih = img.naturalHeight || img.height;
-
-                            ctx.save(); // Save state for clipping
-                            ctx.clip(); // Clip to the rectangle path defined above
-
-                            if (fit === 'fill') {
-                                ctx.drawImage(img, shape.x, shape.y, sw, sh);
-                            } else if (fit === 'aspectFit') {
+                            ctx.save(); ctx.clip();
+                            if (fit === 'fill') { ctx.drawImage(img, shape.x, shape.y, sw, sh); } 
+                            else if (fit === 'aspectFit') {
                                 const scale = Math.min(sw / iw, sh / ih);
-                                const nw = iw * scale;
-                                const nh = ih * scale;
-                                const ox = (sw - nw) / 2;
-                                const oy = (sh - nh) / 2;
-                                ctx.drawImage(img, shape.x + ox, shape.y + oy, nw, nh);
+                                const nw = iw * scale; const nh = ih * scale;
+                                ctx.drawImage(img, shape.x + (sw - nw) / 2, shape.y + (sh - nh) / 2, nw, nh);
                             } else if (fit === 'aspectFill') {
                                 const scale = Math.max(sw / iw, sh / ih);
-                                const nw = iw * scale;
-                                const nh = ih * scale;
-                                const ox = (sw - nw) / 2;
-                                const oy = (sh - nh) / 2;
-                                ctx.drawImage(img, shape.x + ox, shape.y + oy, nw, nh);
+                                const nw = iw * scale; const nh = ih * scale;
+                                ctx.drawImage(img, shape.x + (sw - nw) / 2, shape.y + (sh - nh) / 2, nw, nh);
                             } else if (fit === 'center') {
-                                const ox = (sw - iw) / 2;
-                                const oy = (sh - ih) / 2;
-                                ctx.drawImage(img, shape.x + ox, shape.y + oy, iw, ih);
+                                ctx.drawImage(img, shape.x + (sw - iw) / 2, shape.y + (sh - ih) / 2, iw, ih);
                             }
-                            ctx.restore(); // Remove clip
+                            ctx.restore();
                         }
                     } else {
-                        // Placeholder
-                        ctx.fillStyle = '#e2e8f0';
-                        if(document.documentElement.classList.contains('dark')) ctx.fillStyle = '#4a5568';
+                        ctx.fillStyle = document.documentElement.classList.contains('dark') ? '#4a5568' : '#e2e8f0';
                         ctx.fill();
                         ctx.strokeStyle = '#cbd5e0';
                         ctx.lineWidth = 2 / cameraZoom;
@@ -353,14 +332,12 @@
                 if (shape.fill) ctx.fill();
                 if (shape.border || (shape.type === 'text' && selectedItems.includes(shape))) ctx.stroke();
             } else if (shape.type === 'image' && selectedItems.includes(shape)) {
-                // Draw selection border for image
                 ctx.strokeStyle = '#3b82f6';
                 ctx.lineWidth = 1 / cameraZoom;
                 ctx.stroke();
             }
             ctx.setLineDash([]);
             
-            // Draw text if not image (or if image has text overlay, but usually image replaces text)
             if (shape.type !== 'image') {
                 ctx.fillStyle = shape.textColor;
                 ctx.font = `${shape.fontSize}px Inter`;
@@ -418,7 +395,7 @@
                     ctx.quadraticCurveTo(pathPoints[i].x, pathPoints[i].y, xc, yc);
                 }
                 ctx.quadraticCurveTo(pathPoints[i].x, pathPoints[i].y, pathPoints[i + 1].x, pathPoints[i + 1].y);
-            } else { // 'line' or curve with no waypoints
+            } else { // 'line'
                 ctx.moveTo(pathPoints[0].x, pathPoints[0].y);
                 for (let i = 1; i < pathPoints.length; i++) {
                     ctx.lineTo(pathPoints[i].x, pathPoints[i].y);
@@ -427,15 +404,13 @@
             ctx.stroke();
             ctx.setLineDash([]);
 
-            // Draw arrowhead
             if (pathPoints.length >= 2) {
                 let fromPointForArrow = pathPoints[pathPoints.length - 2];
                 drawArrowhead(ctx, fromPointForArrow, pathPoints[pathPoints.length - 1], isSelected, color);
             }
 
-            // Draw waypoint handles if selected
             if (isSelected) {
-                ctx.fillStyle = '#ffc107'; // Yellow for waypoint handles
+                ctx.fillStyle = '#ffc107';
                 const handleSize = 6 / cameraZoom;
                 (connector.waypoints || []).forEach(wp => {
                     ctx.beginPath();
@@ -465,7 +440,6 @@
             const handleSize = 8 / cameraZoom;
             const connectionPointSize = 5 / cameraZoom;
             
-            // Rotation handle line
             ctx.strokeStyle = '#007bff';
             ctx.lineWidth = 1 / cameraZoom;
             ctx.beginPath();
@@ -473,25 +447,20 @@
             ctx.lineTo(rotationHandle.x, rotationHandle.y);
             ctx.stroke();
 
-            // Rotation handle circle
             ctx.fillStyle = '#007bff';
             ctx.beginPath();
             ctx.arc(rotationHandle.x, rotationHandle.y, handleSize / 2, 0, Math.PI * 2);
             ctx.fill();
 
-            // Resize handles
             for (const handle in handles) {
                 const pos = handles[handle];
                 ctx.fillRect(pos.x - handleSize / 2, pos.y - handleSize / 2, handleSize, handleSize);
             }
             
-            // Connection points
             ctx.fillStyle = '#28a745';
             for(const point in connectionPoints){
                 const pos = connectionPoints[point];
-                ctx.beginPath();
-                ctx.arc(pos.x, pos.y, connectionPointSize, 0, 2*Math.PI);
-                ctx.fill();
+                ctx.beginPath(); ctx.arc(pos.x, pos.y, connectionPointSize, 0, 2*Math.PI); ctx.fill();
             }
         }
 
@@ -519,7 +488,6 @@
             canvas.addEventListener('dblclick', onDoubleClick);
             canvas.addEventListener('wheel', onWheel);
             
-            // Touch Listeners
             canvas.addEventListener('touchstart', onTouchStart);
             canvas.addEventListener('touchmove', onTouchMove);
             canvas.addEventListener('touchend', onTouchEnd);
@@ -568,63 +536,7 @@
             });
         }
         
-        // --- TOUCH HANDLERS ---
-        function onTouchStart(e) {
-            e.preventDefault();
-            if (e.touches.length === 1) {
-                const currentTime = new Date().getTime();
-                const tapLength = currentTime - lastTap;
-                if (tapLength < 300 && tapLength > 0) { // Double tap
-                    handleDoubleClick(e.touches[0]);
-                }
-                lastTap = currentTime;
-                handleMouseDown(e.touches[0]);
-            } else if (e.touches.length === 2) {
-                isMultiTouching = true;
-                isPanning = true;
-                lastTouchDistance = getTouchDistance(e);
-                panStart = getMidpoint(e);
-            }
-        }
-
-        function onTouchMove(e) {
-            e.preventDefault();
-            if (e.touches.length === 1 && !isMultiTouching) {
-                handleMouseMove(e.touches[0]);
-            } else if (e.touches.length === 2) {
-                // Pan
-                const midpoint = getMidpoint(e);
-                cameraOffset.x += midpoint.x - panStart.x;
-                cameraOffset.y += midpoint.y - panStart.y;
-                panStart = midpoint;
-
-                // Zoom
-                const newDist = getTouchDistance(e);
-                const zoomFactor = newDist / lastTouchDistance;
-                
-                const worldX = (midpoint.x - cameraOffset.x) / cameraZoom;
-                const worldY = (midpoint.y - cameraOffset.y) / cameraZoom;
-                const newZoom = cameraZoom * zoomFactor;
-                cameraZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoom));
-                cameraOffset.x = midpoint.x - worldX * cameraZoom;
-                cameraOffset.y = midpoint.y - worldY * cameraZoom;
-
-                lastTouchDistance = newDist;
-                draw();
-            }
-        }
-
-        function onTouchEnd(e) {
-            e.preventDefault();
-            if (e.touches.length === 0) {
-                 if(!isMultiTouching) handleMouseUp(e.changedTouches[0]);
-                 isMultiTouching = false;
-                 isPanning = false;
-                 lastTouchDistance = null;
-            }
-        }
-        
-        // --- MOUSE HANDLERS (wrapped for touch reuse) ---
+        // --- MOUSE HANDLERS ---
         function onMouseDown(e) { handleMouseDown(e); }
         function onMouseMove(e) { handleMouseMove(e); }
         function onMouseUp(e) { handleMouseUp(e); }
@@ -641,10 +553,7 @@
             
             if (selectedItems.length === 1) {
                 const shape = selectedItems[0];
-                if (getRotationHandleAt(mousePos, shape)) {
-                    isRotating = true;
-                    return;
-                }
+                if (getRotationHandleAt(mousePos, shape)) { isRotating = true; return; }
                 const connectionPoint = getConnectionPointAt(mousePos, shape);
                 if(connectionPoint){
                     isConnecting = true;
@@ -654,7 +563,13 @@
                 resizeHandle = getResizeHandleAt(mousePos, shape);
                 if (resizeHandle) { 
                     isResizing = true; 
-                    resizeAspectRatio = shape.width / shape.height; // Store aspect ratio
+                    resizeAspectRatio = shape.width / shape.height;
+                    // Capture initial state for robust resizing
+                    startShapeState = { 
+                        x: shape.x, y: shape.y, w: shape.width, h: shape.height, rotation: shape.rotation || 0,
+                        centerX: shape.x + shape.width/2, centerY: shape.y + shape.height/2
+                    };
+                    startMousePos = mousePos; // Capture start mouse pos
                     return; 
                 }
             }
@@ -665,10 +580,8 @@
             }
             
             const clickedShape = getShapeAt(mousePos);
-            
             if (clickedShape) {
                 selectedConnectors = [];
-                // Standard shift-key logic doesn't apply to touch, so we handle it simply
                 if (!selectedItems.includes(clickedShape)) { selectedItems = [clickedShape]; }
                 isDragging = true;
                 lastMousePos = mousePos;
@@ -678,7 +591,6 @@
                 selectionBox.x = mousePos.x; selectionBox.y = mousePos.y;
                 selectionBox.width = 0; selectionBox.height = 0;
             }
-            
             updatePropertiesPanel();
             draw();
         }
@@ -691,7 +603,7 @@
                 const centerX = shape.x + shape.width / 2;
                 const centerY = shape.y + shape.height / 2;
                 const angle = Math.atan2(mousePos.y - centerY, mousePos.x - centerX);
-                shape.rotation = angle + Math.PI / 2; // Offset by 90 deg because handle is on top
+                shape.rotation = angle + Math.PI / 2;
                 draw();
                 return;
             }
@@ -708,50 +620,95 @@
 
             if (isResizing) {
                 const shape = selectedItems[0];
-                let newX = shape.x;
-                let newY = shape.y;
-                let newWidth = shape.width;
-                let newHeight = shape.height;
+                const dx = mousePos.x - startMousePos.x;
+                const dy = mousePos.y - startMousePos.y;
 
-                // Basic axis-aligned resizing logic
-                if (resizeHandle.includes('right')) newWidth = mousePos.x - shape.x;
-                if (resizeHandle.includes('left')) { 
-                    newWidth = shape.width + (shape.x - mousePos.x); 
-                    newX = mousePos.x; 
-                }
-                if (resizeHandle.includes('bottom')) newHeight = mousePos.y - shape.y;
-                if (resizeHandle.includes('top')) { 
-                    newHeight = shape.height + (shape.y - mousePos.y); 
-                    newY = mousePos.y; 
-                }
+                // Rotate delta back to local space
+                const sin = Math.sin(-(shape.rotation || 0));
+                const cos = Math.cos(-(shape.rotation || 0));
+                const localDx = dx * cos - dy * sin;
+                const localDy = dx * sin + dy * cos;
 
-                // Enforce proportional resizing for corners
+                let newW = startShapeState.w;
+                let newH = startShapeState.h;
+                let shiftX = 0;
+                let shiftY = 0;
+
+                if (resizeHandle.includes('right')) newW += localDx;
+                if (resizeHandle.includes('left')) { newW -= localDx; shiftX = -localDx; }
+                if (resizeHandle.includes('bottom')) newH += localDy;
+                if (resizeHandle.includes('top')) { newH -= localDy; shiftY = -localDy; }
+
+                // Proportional logic using Projection Method for stability
                 if (['topLeft', 'topRight', 'bottomLeft', 'bottomRight'].includes(resizeHandle)) {
-                    const currentRatio = newWidth / newHeight;
+                    // Project (newW, newH) onto the diagonal vector (ratio, 1)
+                    // Formula for closest point on line y = x/ratio:
+                    // H_proj = (W*r + H) / (r^2 + 1)
+                    // W_proj = H_proj * r
+                    const r = resizeAspectRatio;
+                    const refinedH = (newW * r + newH) / (r * r + 1);
+                    const refinedW = refinedH * r;
                     
-                    if (currentRatio < resizeAspectRatio) {
-                        // Height is driving the size (dragged more vertically), adjust width to match ratio
-                        newWidth = newHeight * resizeAspectRatio;
-                        if (resizeHandle.includes('left')) {
-                            newX = shape.x + (shape.width - newWidth);
-                        }
-                    } else {
-                        // Width is driving the size (dragged more horizontally), adjust height to match ratio
-                        newHeight = newWidth / resizeAspectRatio;
-                        if (resizeHandle.includes('top')) {
-                            newY = shape.y + (shape.height - newHeight);
-                        }
-                    }
+                    // Calculate adjustment deltas
+                    const adjDx = refinedW - newW;
+                    const adjDy = refinedH - newH;
+                    
+                    newW = refinedW;
+                    newH = refinedH;
+
+                    // Adjust shift if we are dragging Left or Top
+                    if (resizeHandle.includes('left')) shiftX -= adjDx;
+                    if (resizeHandle.includes('top')) shiftY -= adjDy;
                 }
 
-                if (newWidth > 20 && newHeight > 20) { 
-                    shape.x = newX; 
-                    shape.y = newY; 
-                    shape.width = newWidth; 
-                    shape.height = newHeight; 
-                }
+                if (newW < 20) newW = 20; // Minimum size constraint
+                if (newH < 20) newH = 20;
+
+                // Rotate shift back to world space
+                const wShiftX = shiftX * cos + shiftY * sin; // Rotate by +angle (undo negative)? No, +angle is 'rotation'
+                const wShiftY = -shiftX * sin + shiftY * cos;
+                // Actually rotate by +shape.rotation
+                const rSin = Math.sin(shape.rotation || 0);
+                const rCos = Math.cos(shape.rotation || 0);
+                const worldShiftX = shiftX * rCos - shiftY * rSin;
+                const worldShiftY = shiftX * rSin + shiftY * rCos;
+
+                // We need to update position.
+                // Logic: The Anchor point (opposite to handle) MUST remain fixed.
+                // Current Center = StartCenter + WorldShift/2 + SizeDelta/2... getting complex.
+                
+                // Simpler: Calculate new Unrotated Box TopLeft in Local Space
+                // Old Local TL is at (-startW/2, -startH/2) relative to Center.
+                // New Local TL is at (-startW/2 + shiftX, -startH/2 + shiftY) relative to Center? 
+                // No, Center moves.
+                
+                // Let's simply update the Unrotated Box (x,y,w,h).
+                // New Center in Local Space relative to Old Center:
+                // localCenterX = startShapeState.centerX + (localDx of center);
+                // But we know how the box changed:
+                // deltaWidth = newW - startW; deltaHeight = newH - startH;
+                // If expanding right, center moves right by deltaWidth/2.
+                
+                let dCx = 0, dCy = 0;
+                if (resizeHandle.includes('right')) dCx += (newW - startShapeState.w)/2;
+                if (resizeHandle.includes('left')) dCx -= (newW - startShapeState.w)/2;
+                if (resizeHandle.includes('bottom')) dCy += (newH - startShapeState.h)/2;
+                if (resizeHandle.includes('top')) dCy -= (newH - startShapeState.h)/2;
+
+                // Rotate this center shift
+                const worldDCx = dCx * rCos - dCy * rSin;
+                const worldDCy = dCx * rSin + dCy * rCos;
+
+                const newCenterX = startShapeState.centerX + worldDCx;
+                const newCenterY = startShapeState.centerY + worldDCy;
+
+                shape.width = newW;
+                shape.height = newH;
+                shape.x = newCenterX - newW / 2;
+                shape.y = newCenterY - newH / 2;
+
                 if(snapToGrid) snapShape(shape);
-                updateChildrenPositions(shape, 0, 0);
+                updateChildrenPositions(shape, 0, 0); // Placeholder, complex for resize
                 draw();
             } else if (isDragging) {
                  const dx = mousePos.x - lastMousePos.x;
@@ -780,7 +737,7 @@
                     const shape = selectedItems[0];
                     if (getRotationHandleAt(mousePos, shape)) { canvas.style.cursor = 'crosshair'; return; }
                     const handle = getResizeHandleAt(mousePos, shape);
-                    if(handle) { canvas.style.cursor = getResizeCursor(handle); return; }
+                    if(handle) { canvas.style.cursor = getResizeCursor(handle, shape.rotation || 0); return; }
                     if(getConnectionPointAt(mousePos, shape)){ canvas.style.cursor = 'crosshair'; return; }
                 }
                 canvas.style.cursor = hoveredConnector ? 'pointer' : (getShapeAt(mousePos) ? 'move' : 'default');
@@ -855,309 +812,164 @@
             draw();
         }
 
+        // ... (Touch Handlers remain same)
+        function onTouchStart(e) {
+            e.preventDefault();
+            if (e.touches.length === 1) {
+                const currentTime = new Date().getTime();
+                const tapLength = currentTime - lastTap;
+                if (tapLength < 300 && tapLength > 0) { handleDoubleClick(e.touches[0]); }
+                lastTap = currentTime; handleMouseDown(e.touches[0]);
+            } else if (e.touches.length === 2) {
+                isMultiTouching = true; isPanning = true; lastTouchDistance = getTouchDistance(e); panStart = getMidpoint(e);
+            }
+        }
+        function onTouchMove(e) {
+            e.preventDefault();
+            if (e.touches.length === 1 && !isMultiTouching) { handleMouseMove(e.touches[0]); } 
+            else if (e.touches.length === 2) {
+                const midpoint = getMidpoint(e);
+                cameraOffset.x += midpoint.x - panStart.x; cameraOffset.y += midpoint.y - panStart.y; panStart = midpoint;
+                const newDist = getTouchDistance(e); const zoomFactor = newDist / lastTouchDistance;
+                const worldX = (midpoint.x - cameraOffset.x) / cameraZoom; const worldY = (midpoint.y - cameraOffset.y) / cameraZoom;
+                const newZoom = cameraZoom * zoomFactor; cameraZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoom));
+                cameraOffset.x = midpoint.x - worldX * cameraZoom; cameraOffset.y = midpoint.y - worldY * cameraZoom;
+                lastTouchDistance = newDist; draw();
+            }
+        }
+        function onTouchEnd(e) {
+            e.preventDefault();
+            if (e.touches.length === 0) { if(!isMultiTouching) handleMouseUp(e.changedTouches[0]); isMultiTouching = false; isPanning = false; lastTouchDistance = null; }
+        }
+
         function handleDoubleClick(e) {
             const mousePos = getEventPos(e);
             
             const waypointHit = getWaypointAt(mousePos);
             if (waypointHit) {
                 waypointHit.connector.waypoints.splice(waypointHit.waypointIndex, 1);
-                draw();
-                return;
+                draw(); return;
             }
 
             const shape = getShapeAt(mousePos);
-            if (shape) {
-                startTextEdit(shape);
-            } else {
+            if (shape) { startTextEdit(shape); } 
+            else {
                 const hit = getConnectorSegmentAt(mousePos);
                 if (hit) {
-                    if (!hit.connector.waypoints) {
-                        hit.connector.waypoints = [];
-                    }
+                    if (!hit.connector.waypoints) { hit.connector.waypoints = []; }
                     hit.connector.waypoints.splice(hit.segmentIndex - 1, 0, mousePos);
-                    selectedConnectors = [hit.connector];
-                    selectedItems = [];
-                    updatePropertiesPanel();
-                    draw();
+                    selectedConnectors = [hit.connector]; selectedItems = []; updatePropertiesPanel(); draw();
                 }
             }
         }
         
+        // ... (Wheel, Key handlers same) ...
         function onWheel(e) {
-            e.preventDefault();
-            const rect = canvas.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
-            const mouseY = e.clientY - rect.top;
-
-            const worldX = (mouseX - cameraOffset.x) / cameraZoom;
-            const worldY = (mouseY - cameraOffset.y) / cameraZoom;
-
-            const delta = e.deltaY * SCROLL_SENSITIVITY;
-            const newZoom = cameraZoom * (1 - delta);
-            cameraZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoom));
-            cameraOffset.x = mouseX - worldX * cameraZoom;
-            cameraOffset.y = mouseY - worldY * cameraZoom;
-            draw();
+            e.preventDefault(); const rect = canvas.getBoundingClientRect(); const mouseX = e.clientX - rect.left; const mouseY = e.clientY - rect.top;
+            const worldX = (mouseX - cameraOffset.x) / cameraZoom; const worldY = (mouseY - cameraOffset.y) / cameraZoom;
+            const delta = e.deltaY * SCROLL_SENSITIVITY; const newZoom = cameraZoom * (1 - delta); cameraZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoom));
+            cameraOffset.x = mouseX - worldX * cameraZoom; cameraOffset.y = mouseY - worldY * cameraZoom; draw();
         }
-
         function onKeyDown(e){
-            const activeEl = document.activeElement;
-            if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) return;
-
-            if(e.key === ' ' && !isPanning){
-                isPanning = true; panStart = { x: e.clientX, y: e.clientY }; canvas.style.cursor = 'grabbing'; e.preventDefault();
-            }
-            if ((e.key === 'Delete' || e.key === 'Backspace') && (selectedItems.length > 0 || selectedConnectors.length > 0)) {
-                e.preventDefault(); deleteSelected();
-            }
+            const activeEl = document.activeElement; if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) return;
+            if(e.key === ' ' && !isPanning){ isPanning = true; panStart = { x: e.clientX, y: e.clientY }; canvas.style.cursor = 'grabbing'; e.preventDefault(); }
+            if ((e.key === 'Delete' || e.key === 'Backspace') && (selectedItems.length > 0 || selectedConnectors.length > 0)) { e.preventDefault(); deleteSelected(); }
         }
-        
-        function onKeyUp(e){
-             if(e.key === ' '){ isPanning = false; canvas.style.cursor = 'default'; }
-        }
+        function onKeyUp(e){ if(e.key === ' '){ isPanning = false; canvas.style.cursor = 'default'; } }
+        function onDrop(e) { e.preventDefault(); const type = e.dataTransfer.getData('text/plain'); const mousePos = getEventPos(e); addShape(type, mousePos.x, mousePos.y); draw(); }
 
-        function onDrop(e) {
-            e.preventDefault();
-            const type = e.dataTransfer.getData('text/plain');
-            const mousePos = getEventPos(e);
-            addShape(type, mousePos.x, mousePos.y);
-            draw();
-        }
-
-        // --- CORE LOGIC ---
+        // ... (Core Logic same, addShape, deleteSelected, textEdit, z-index...) ...
         function addShape(type, x, y) {
-            const newShape = {
-                id: Date.now(), type: type, x: x - 75, y: y - 40, width: 150, height: 80,
-                text: 'New Shape', textColor: '#ffffff', fontSize: 14,
-                fillColor: '#4a5568', borderColor: '#a0aec0',
-                borderWidth: 2, fill: true, border: true, children: [], parentId: null,
-                borderRadius: 4, opacity: 1, rotation: 0,
-            };
+            const newShape = { id: Date.now(), type: type, x: x - 75, y: y - 40, width: 150, height: 80, text: 'New Shape', textColor: '#ffffff', fontSize: 14, fillColor: '#4a5568', borderColor: '#a0aec0', borderWidth: 2, fill: true, border: true, children: [], parentId: null, borderRadius: 4, opacity: 1, rotation: 0 };
             if(type === 'text'){ newShape.fill = false; newShape.border = false; newShape.text = 'Enter text...'; }
             if(type === 'pie'){ newShape.angle = 90; }
             if(type === 'checkmark'){ newShape.fill = false; newShape.width = 50; newShape.height = 50; newShape.text = ''; }
             if(type === 'image'){ newShape.text = ''; newShape.imageSrc = null; newShape.imageFit = 'fill'; }
-            
-            const parentShape = getShapeAt({x, y});
-            if(parentShape) { newShape.parentId = parentShape.id; parentShape.children.push(newShape.id); }
-
-            shapes.push(newShape);
-            selectedItems = [newShape];
-            selectedConnectors = [];
-            updatePropertiesPanel();
+            const parentShape = getShapeAt({x, y}); if(parentShape) { newShape.parentId = parentShape.id; parentShape.children.push(newShape.id); }
+            shapes.push(newShape); selectedItems = [newShape]; selectedConnectors = []; updatePropertiesPanel();
         }
-        
         function deleteSelected() {
             if (selectedItems.length > 0) {
                 const idsToDelete = new Set(selectedItems.flatMap(s => s.type === 'group' ? [s.id, ...s.children] : [s.id]));
-                shapes = shapes.filter(s => !idsToDelete.has(s.id));
-                connectors = connectors.filter(c => !idsToDelete.has(c.from.shapeId) && !idsToDelete.has(c.to.shapeId));
+                shapes = shapes.filter(s => !idsToDelete.has(s.id)); connectors = connectors.filter(c => !idsToDelete.has(c.from.shapeId) && !idsToDelete.has(c.to.shapeId));
             } else if (selectedConnectors.length > 0) {
-                const idsToDelete = new Set(selectedConnectors.map(c => c.id));
-                connectors = connectors.filter(c => !idsToDelete.has(c.id));
+                const idsToDelete = new Set(selectedConnectors.map(c => c.id)); connectors = connectors.filter(c => !idsToDelete.has(c.id));
             }
-            selectedItems = []; selectedConnectors = [];
-            updatePropertiesPanel(); draw();
+            selectedItems = []; selectedConnectors = []; updatePropertiesPanel(); draw();
         }
-
         function startTextEdit(shape) {
             textEditor.style.display = 'block'; textEditor.value = shape.text;
             const screenX = shape.x * cameraZoom + cameraOffset.x; const screenY = shape.y * cameraZoom + cameraOffset.y;
             const screenWidth = shape.width * cameraZoom; const screenHeight = shape.height * cameraZoom;
-            textEditor.style.left = `${screenX}px`; textEditor.style.top = `${screenY}px`;
-            textEditor.style.width = `${screenWidth}px`; textEditor.style.height = `${screenHeight}px`;
-            textEditor.style.fontSize = `${shape.fontSize * cameraZoom}px`;
-            textEditor.style.textAlign = 'center'; textEditor.style.fontFamily = 'Inter';
-            textEditor.style.transform = `rotate(${shape.rotation || 0}rad)`;
+            textEditor.style.left = `${screenX}px`; textEditor.style.top = `${screenY}px`; textEditor.style.width = `${screenWidth}px`; textEditor.style.height = `${screenHeight}px`;
+            textEditor.style.fontSize = `${shape.fontSize * cameraZoom}px`; textEditor.style.textAlign = 'center'; textEditor.style.fontFamily = 'Inter'; textEditor.style.transform = `rotate(${shape.rotation || 0}rad)`;
             textEditor.focus(); textEditor.select();
         }
-
-        function finishTextEdit() {
-            if (selectedItems.length === 1) { selectedItems[0].text = textEditor.value; }
-            textEditor.style.display = 'none'; textEditor.value = '';
-            textEditor.style.transform = 'rotate(0rad)';
-            draw(); updatePropertiesPanel();
-        }
-
-        function bringForward(shape) {
-            const index = shapes.findIndex(s => s.id === shape.id);
-            if (index > -1 && index < shapes.length - 1) { [shapes[index], shapes[index + 1]] = [shapes[index + 1], shapes[index]]; draw(); }
-        }
-
-        function sendBackward(shape) {
-            const index = shapes.findIndex(s => s.id === shape.id);
-            if (index > 0) { [shapes[index], shapes[index - 1]] = [shapes[index - 1], shapes[index]]; draw(); }
-        }
-
-        function bringToFront(shape) {
-            const index = shapes.findIndex(s => s.id === shape.id);
-            if (index > -1 && index < shapes.length - 1) { shapes.splice(index, 1); shapes.push(shape); draw(); }
-        }
-
-        function sendToBack(shape) {
-            const index = shapes.findIndex(s => s.id === shape.id);
-            if (index > 0) { shapes.splice(index, 1); shapes.unshift(shape); draw(); }
-        }
-
+        function finishTextEdit() { if (selectedItems.length === 1) { selectedItems[0].text = textEditor.value; } textEditor.style.display = 'none'; textEditor.value = ''; textEditor.style.transform = 'rotate(0rad)'; draw(); updatePropertiesPanel(); }
+        function bringForward(shape) { const index = shapes.findIndex(s => s.id === shape.id); if (index > -1 && index < shapes.length - 1) { [shapes[index], shapes[index + 1]] = [shapes[index + 1], shapes[index]]; draw(); } }
+        function sendBackward(shape) { const index = shapes.findIndex(s => s.id === shape.id); if (index > 0) { [shapes[index], shapes[index - 1]] = [shapes[index - 1], shapes[index]]; draw(); } }
+        function bringToFront(shape) { const index = shapes.findIndex(s => s.id === shape.id); if (index > -1 && index < shapes.length - 1) { shapes.splice(index, 1); shapes.push(shape); draw(); } }
+        function sendToBack(shape) { const index = shapes.findIndex(s => s.id === shape.id); if (index > 0) { shapes.splice(index, 1); shapes.unshift(shape); draw(); } }
         function groupSelection() {
             if (selectedItems.length <= 1) return;
             let minX = Infinity, minY = Infinity, maxX = 0, maxY = 0;
             selectedItems.forEach(s => { minX = Math.min(minX, s.x); minY = Math.min(minY, s.y); maxX = Math.max(maxX, s.x + s.width); maxY = Math.max(maxY, s.y + s.height); });
             const padding = 20;
-            const groupShape = {
-                id: Date.now(), type: 'group', x: minX - padding, y: minY - padding,
-                width: (maxX - minX) + padding * 2, height: (maxY - minY) + padding * 2, text: '',
-                borderColor: '#3498db', borderWidth: 2,
-                fill: false, border: true, children: selectedItems.map(s => s.id), parentId: null, rotation: 0
-            };
-            selectedItems.forEach(s => s.parentId = groupShape.id);
-            shapes.push(groupShape); selectedItems = [groupShape];
-            updatePropertiesPanel(); draw();
+            const groupShape = { id: Date.now(), type: 'group', x: minX - padding, y: minY - padding, width: (maxX - minX) + padding * 2, height: (maxY - minY) + padding * 2, text: '', borderColor: '#3498db', borderWidth: 2, fill: false, border: true, children: selectedItems.map(s => s.id), parentId: null, rotation: 0 };
+            selectedItems.forEach(s => s.parentId = groupShape.id); shapes.push(groupShape); selectedItems = [groupShape]; updatePropertiesPanel(); draw();
         }
-
         function ungroupSelection() {
             if(selectedItems.length !== 1 || selectedItems[0].type !== 'group') return;
             const group = selectedItems[0];
-            group.children.forEach(childId => {
-                const child = shapes.find(s => s.id === childId);
-                if (child) child.parentId = null;
-            });
-            shapes = shapes.filter(s => s.id !== group.id);
-            selectedItems = [];
-            updatePropertiesPanel(); draw();
+            group.children.forEach(childId => { const child = shapes.find(s => s.id === childId); if (child) child.parentId = null; });
+            shapes = shapes.filter(s => s.id !== group.id); selectedItems = []; updatePropertiesPanel(); draw();
         }
 
-        // --- UTILITY & HELPER FUNCTIONS ---
-        function getEventPos(evt) {
-            const rect = canvas.getBoundingClientRect();
-            const clientX = evt.clientX ?? evt.touches[0].clientX;
-            const clientY = evt.clientY ?? evt.touches[0].clientY;
-            return { x: (clientX - rect.left - cameraOffset.x) / cameraZoom, y: (clientY - rect.top - cameraOffset.y) / cameraZoom };
-        }
-
+        // ... (Utility functions same, except rotatePoint used more) ...
+        function getEventPos(evt) { const rect = canvas.getBoundingClientRect(); const clientX = evt.clientX ?? evt.touches[0].clientX; const clientY = evt.clientY ?? evt.touches[0].clientY; return { x: (clientX - rect.left - cameraOffset.x) / cameraZoom, y: (clientY - rect.top - cameraOffset.y) / cameraZoom }; }
         function getShapeAt(pos) {
             for (let i = shapes.length - 1; i >= 0; i--) {
                 const shape = shapes[i];
                 const center = { x: shape.x + shape.width / 2, y: shape.y + shape.height / 2 };
                 const unrotatedPos = rotatePoint(pos, center, -(shape.rotation || 0));
-
-                if (unrotatedPos.x >= shape.x && unrotatedPos.x <= shape.x + shape.width && unrotatedPos.y >= shape.y && unrotatedPos.y <= shape.y + shape.height) { 
-                    return shape; 
-                }
-            }
-            return null;
+                if (unrotatedPos.x >= shape.x && unrotatedPos.x <= shape.x + shape.width && unrotatedPos.y >= shape.y && unrotatedPos.y <= shape.y + shape.height) { return shape; }
+            } return null;
         }
-
         function getConnectorPath(connector) {
-            const startShape = shapes.find(s => s.id === connector.from.shapeId);
-            const endShape = shapes.find(s => s.id === connector.to.shapeId);
-            if (!startShape || !endShape) return [];
-
-            const startPoint = getAttachPoint(startShape, connector.from.point);
-            const endPoint = getAttachPoint(endShape, connector.to.point);
+            const startShape = shapes.find(s => s.id === connector.from.shapeId); const endShape = shapes.find(s => s.id === connector.to.shapeId); if (!startShape || !endShape) return [];
+            const startPoint = getAttachPoint(startShape, connector.from.point); const endPoint = getAttachPoint(endShape, connector.to.point);
             return [startPoint, ...(connector.waypoints || []), endPoint];
         }
-
         function getConnectorSegmentAt(pos) {
             const hitRadius = 5 / cameraZoom;
             for (const connector of connectors) {
-                const pathPoints = getConnectorPath(connector);
-                if (pathPoints.length < 2) continue;
-
-                const lineType = connector.lineType || 'line';
-                const hasWaypoints = connector.waypoints && connector.waypoints.length > 0;
+                const pathPoints = getConnectorPath(connector); if (pathPoints.length < 2) continue;
+                const lineType = connector.lineType || 'line'; const hasWaypoints = connector.waypoints && connector.waypoints.length > 0;
                 let effectivePathPoints = pathPoints;
-
                 if (lineType === 'curve' && hasWaypoints) {
-                    const approxPoints = [];
-                    const steps = 20;
-                    let p0 = pathPoints[0];
-                    approxPoints.push(p0);
-
+                    const approxPoints = []; const steps = 20; let p0 = pathPoints[0]; approxPoints.push(p0);
                     for (let i = 1; i < pathPoints.length - 1; i++) {
-                        const p1 = pathPoints[i];
-                        const p2 = (i < pathPoints.length - 2)
-                            ? { x: (p1.x + pathPoints[i + 1].x) / 2, y: (p1.y + pathPoints[i + 1].y) / 2 }
-                            : pathPoints[i + 1];
-                        
-                        for (let j = 1; j <= steps; j++) {
-                            const t = j / steps;
-                            const mt = 1 - t;
-                            approxPoints.push({
-                                x: mt * mt * p0.x + 2 * mt * t * p1.x + t * t * p2.x,
-                                y: mt * mt * p0.y + 2 * mt * t * p1.y + t * t * p2.y,
-                            });
-                        }
-                        p0 = p2;
-                    }
-                    effectivePathPoints = approxPoints;
+                        const p1 = pathPoints[i]; const p2 = (i < pathPoints.length - 2) ? { x: (p1.x + pathPoints[i + 1].x) / 2, y: (p1.y + pathPoints[i + 1].y) / 2 } : pathPoints[i + 1];
+                        for (let j = 1; j <= steps; j++) { const t = j / steps; const mt = 1 - t; approxPoints.push({ x: mt * mt * p0.x + 2 * mt * t * p1.x + t * t * p2.x, y: mt * mt * p0.y + 2 * mt * t * p1.y + t * t * p2.y }); } p0 = p2;
+                    } effectivePathPoints = approxPoints;
                 }
-                
                 for (let i = 0; i < effectivePathPoints.length - 1; i++) {
-                    const p1 = effectivePathPoints[i];
-                    const p2 = effectivePathPoints[i+1];
-                    if (isPointOnLineSegment(pos, p1, p2, hitRadius)) {
-                        let closestOrigSegment = 0;
-                        let minDistSq = Infinity;
-                        for (let j = 0; j < pathPoints.length - 1; j++) {
-                            const distSq = distToSegmentSquared(pos, pathPoints[j], pathPoints[j+1]);
-                            if(distSq < minDistSq) {
-                                minDistSq = distSq;
-                                closestOrigSegment = j + 1;
-                            }
-                        }
-                        return { connector, segmentIndex: closestOrigSegment };
-                    }
+                    const p1 = effectivePathPoints[i]; const p2 = effectivePathPoints[i+1];
+                    if (isPointOnLineSegment(pos, p1, p2, hitRadius)) { let closestOrigSegment = 0; let minDistSq = Infinity; for (let j = 0; j < pathPoints.length - 1; j++) { const distSq = distToSegmentSquared(pos, pathPoints[j], pathPoints[j+1]); if(distSq < minDistSq) { minDistSq = distSq; closestOrigSegment = j + 1; } } return { connector, segmentIndex: closestOrigSegment }; }
                 }
-            }
-            return null;
+            } return null;
         }
-
-        function getConnectorAt(pos) {
-            const hitInfo = getConnectorSegmentAt(pos);
-            return hitInfo ? hitInfo.connector : null;
-        }
-
+        function getConnectorAt(pos) { const hitInfo = getConnectorSegmentAt(pos); return hitInfo ? hitInfo.connector : null; }
         function getConnectorEndAt(pos) {
-            if (selectedConnectors.length !== 1) return null;
-            const connector = selectedConnectors[0];
-            const pathPoints = getConnectorPath(connector);
-            if (pathPoints.length < 2) return null;
-
-            const startPoint = pathPoints[0];
-            const endPoint = pathPoints[pathPoints.length - 1];
-            const hitRadius = 10 / cameraZoom;
-
-            const distToStart = Math.hypot(pos.x - startPoint.x, pos.y - startPoint.y);
-            const distToEnd = Math.hypot(pos.x - endPoint.x, pos.y - endPoint.y);
-
-            // Prioritize arrowhead ('to') for dragging
-            if (distToEnd < hitRadius) { return { connector, end: 'to' }; }
-            if (distToStart < hitRadius) { return { connector, end: 'from' }; }
-            return null;
+            if (selectedConnectors.length !== 1) return null; const connector = selectedConnectors[0]; const pathPoints = getConnectorPath(connector); if (pathPoints.length < 2) return null;
+            const startPoint = pathPoints[0]; const endPoint = pathPoints[pathPoints.length - 1]; const hitRadius = 10 / cameraZoom;
+            const distToStart = Math.hypot(pos.x - startPoint.x, pos.y - startPoint.y); const distToEnd = Math.hypot(pos.x - endPoint.x, pos.y - endPoint.y);
+            if (distToEnd < hitRadius) { return { connector, end: 'to' }; } if (distToStart < hitRadius) { return { connector, end: 'from' }; } return null;
         }
-
-
         function getWaypointAt(pos) {
-            const hitRadius = 8 / cameraZoom;
-            if (selectedConnectors.length === 1) {
-                const connector = selectedConnectors[0];
-                if (!connector.waypoints) return null;
-                for (let i = 0; i < connector.waypoints.length; i++) {
-                    const wp = connector.waypoints[i];
-                    const distSq = (pos.x - wp.x) * (pos.x - wp.x) + (pos.y - wp.y) * (pos.y - wp.y);
-                    if (distSq < (hitRadius * hitRadius)) {
-                        return { connector, waypointIndex: i };
-                    }
-                }
-            }
-            return null;
+            const hitRadius = 8 / cameraZoom; if (selectedConnectors.length === 1) { const connector = selectedConnectors[0]; if (!connector.waypoints) return null; for (let i = 0; i < connector.waypoints.length; i++) { const wp = connector.waypoints[i]; const distSq = (pos.x - wp.x) * (pos.x - wp.x) + (pos.y - wp.y) * (pos.y - wp.y); if (distSq < (hitRadius * hitRadius)) { return { connector, waypointIndex: i }; } } } return null;
         }
-        
-        function getRotationHandle(shape) {
-            return { x: shape.x + shape.width / 2, y: shape.y - 30 / cameraZoom };
-        }
-
+        function getRotationHandle(shape) { return { x: shape.x + shape.width / 2, y: shape.y - 30 / cameraZoom }; }
         function getResizeHandles(shape) {
              return {
                 topLeft: { x: shape.x, y: shape.y }, topRight: { x: shape.x + shape.width, y: shape.y },
@@ -1166,7 +978,6 @@
                 left: { x: shape.x, y: shape.y + shape.height/2 }, right: { x: shape.x + shape.width, y: shape.y + shape.height/2 },
             };
         }
-        
         function getConnectionPoints(shape){
             const offset = 15 / cameraZoom;
             return {
@@ -1174,118 +985,28 @@
                 left: { x: shape.x - offset, y: shape.y + shape.height / 2 }, right: { x: shape.x + shape.width + offset, y: shape.y + shape.height / 2 },
             };
         }
+        function getRotationHandleAt(pos, shape) { const center = { x: shape.x + shape.width / 2, y: shape.y + shape.height / 2 }; const handlePos = rotatePoint(getRotationHandle(shape), center, shape.rotation || 0); const hitRadius = 10 / cameraZoom; return Math.hypot(pos.x - handlePos.x, pos.y - handlePos.y) < hitRadius; }
+        function getResizeHandleAt(pos, shape) { const handles = getResizeHandles(shape); const center = { x: shape.x + shape.width / 2, y: shape.y + shape.height / 2 }; const hitRadius = 14 / cameraZoom; for (const handle in handles) { const rotatedHandle = rotatePoint(handles[handle], center, shape.rotation || 0); if (Math.hypot(pos.x - rotatedHandle.x, pos.y - rotatedHandle.y) < hitRadius / 2) return handle; } return null; }
+        function getConnectionPointAt(pos, shape) { const points = getConnectionPoints(shape); const center = { x: shape.x + shape.width / 2, y: shape.y + shape.height / 2 }; const hitRadius = 10 / cameraZoom; for (const point in points) { const rotatedPoint = rotatePoint(points[point], center, shape.rotation || 0); if (Math.hypot(pos.x - rotatedPoint.x, pos.y - rotatedPoint.y) < hitRadius / 2) return point; } return null; }
+        function getAttachPoint(shape, pointName) { const unrotatedPoints = getConnectionPoints(shape); const center = { x: shape.x + shape.width / 2, y: shape.y + shape.height / 2 }; const unrotatedPoint = unrotatedPoints[pointName] || center; return rotatePoint(unrotatedPoint, center, shape.rotation || 0); }
+        function rotatePoint(point, center, angle) { const dx = point.x - center.x; const dy = point.y - center.y; const cos = Math.cos(angle); const sin = Math.sin(angle); return { x: center.x + dx * cos - dy * sin, y: center.y + dx * sin + dy * cos }; }
+        function getResizeCursor(handle, rotation = 0) {
+            let angle = 0;
+            switch(handle) { case 'right': angle = 0; break; case 'bottomRight': angle = 45; break; case 'bottom': angle = 90; break; case 'bottomLeft': angle = 135; break; case 'left': angle = 180; break; case 'topLeft': angle = 225; break; case 'top': angle = 270; break; case 'topRight': angle = 315; break; }
+            angle += (rotation * 180 / Math.PI); angle = (angle % 360 + 360) % 360;
+            if (angle >= 337.5 || angle < 22.5) return 'ew-resize'; if (angle >= 22.5 && angle < 67.5) return 'nwse-resize'; if (angle >= 67.5 && angle < 112.5) return 'ns-resize'; if (angle >= 112.5 && angle < 157.5) return 'nesw-resize'; if (angle >= 157.5 && angle < 202.5) return 'ew-resize'; if (angle >= 202.5 && angle < 247.5) return 'nwse-resize'; if (angle >= 247.5 && angle < 292.5) return 'ns-resize'; if (angle >= 292.5 && angle < 337.5) return 'nesw-resize'; return 'default';
+        }
+        function snapShape(shape) { shape.x = Math.round(shape.x / GRID_SIZE) * GRID_SIZE; shape.y = Math.round(shape.y / GRID_SIZE) * GRID_SIZE; shape.width = Math.round(shape.width / GRID_SIZE) * GRID_SIZE; shape.height = Math.round(shape.height / GRID_SIZE) * GRID_SIZE; }
+        function isPointOnLineSegment(p, a, b, radius) { const dx = b.x - a.x, dy = b.y - a.y; const lenSq = dx * dx + dy * dy; if (lenSq === 0) { return Math.hypot(p.x - a.x, p.y - a.y) < radius; } let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq; t = Math.max(0, Math.min(1, t)); const closestX = a.x + t * dx; const closestY = a.y + t * dy; const distSq = (p.x - closestX) * (p.x - closestX) + (p.y - closestY) * (p.y - closestY); return distSq < radius * radius; }
+        function distToSegmentSquared(p, a, b) { const dx = b.x - a.x, dy = b.y - a.y; const lenSq = dx * dx + dy * dy; if (lenSq === 0) { return Math.hypot(p.x - a.x, p.y - a.y) ** 2; } let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq; t = Math.max(0, Math.min(1, t)); const closestX = a.x + t * dx; const closestY = a.y + t * dy; return (p.x - closestX) * (p.x - closestX) + (p.y - closestY) * (p.y - closestY); }
+        function updateChildrenPositions(parentShape, dx, dy) { if(parentShape.type !== 'group' || !parentShape.children) return; parentShape.children.forEach(childId => { const child = shapes.find(s => s.id === childId); if (child) { child.x += dx; child.y += dy; updateChildrenPositions(child, dx, dy); } }); }
+        function getNormalizedSelectionBox() { const x = selectionBox.width < 0 ? selectionBox.x + selectionBox.width : selectionBox.x; const y = selectionBox.height < 0 ? selectionBox.y + selectionBox.height : selectionBox.y; const width = Math.abs(selectionBox.width); const height = Math.abs(selectionBox.height); return { x, y, width, height }; }
+        function getTouchDistance(e) { const dx = e.touches[0].clientX - e.touches[1].clientX; const dy = e.touches[0].clientY - e.touches[1].clientY; return Math.hypot(dx, dy); }
+        function getMidpoint(e) { return { x: (e.touches[0].clientX + e.touches[1].clientX) / 2, y: (e.touches[0].clientY + e.touches[1].clientY) / 2 }; }
 
-        function getRotationHandleAt(pos, shape) {
-            const center = { x: shape.x + shape.width / 2, y: shape.y + shape.height / 2 };
-            const handlePos = rotatePoint(getRotationHandle(shape), center, shape.rotation || 0);
-            const hitRadius = 10 / cameraZoom;
-            return Math.hypot(pos.x - handlePos.x, pos.y - handlePos.y) < hitRadius;
-        }
-        
-        function getResizeHandleAt(pos, shape) {
-            const handles = getResizeHandles(shape);
-            const center = { x: shape.x + shape.width / 2, y: shape.y + shape.height / 2 };
-            const hitRadius = 14 / cameraZoom;
-            for (const handle in handles) { 
-                const rotatedHandle = rotatePoint(handles[handle], center, shape.rotation || 0);
-                if (Math.hypot(pos.x - rotatedHandle.x, pos.y - rotatedHandle.y) < hitRadius / 2) return handle; 
-            }
-            return null;
-        }
-
-        function getConnectionPointAt(pos, shape) {
-            const points = getConnectionPoints(shape);
-            const center = { x: shape.x + shape.width / 2, y: shape.y + shape.height / 2 };
-            const hitRadius = 10 / cameraZoom;
-            for (const point in points) { 
-                const rotatedPoint = rotatePoint(points[point], center, shape.rotation || 0);
-                if (Math.hypot(pos.x - rotatedPoint.x, pos.y - rotatedPoint.y) < hitRadius / 2) return point; 
-            }
-            return null;
-        }
-        
-        function getAttachPoint(shape, pointName) {
-            const unrotatedPoints = getConnectionPoints(shape);
-            const center = { x: shape.x + shape.width / 2, y: shape.y + shape.height / 2 };
-            const unrotatedPoint = unrotatedPoints[pointName] || center;
-            return rotatePoint(unrotatedPoint, center, shape.rotation || 0);
-        }
-
-        function rotatePoint(point, center, angle) {
-            const dx = point.x - center.x;
-            const dy = point.y - center.y;
-            const cos = Math.cos(angle);
-            const sin = Math.sin(angle);
-            return {
-                x: center.x + dx * cos - dy * sin,
-                y: center.y + dx * sin + dy * cos
-            };
-        }
-
-        function getResizeCursor(handle) {
-            if (handle.includes('top') && handle.includes('left')) return 'nwse-resize'; if (handle.includes('top') && handle.includes('right')) return 'nesw-resize';
-            if (handle.includes('bottom') && handle.includes('left')) return 'nesw-resize'; if (handle.includes('bottom') && handle.includes('right')) return 'nwse-resize';
-            if (handle.includes('top') || handle.includes('bottom')) return 'ns-resize'; if (handle.includes('left') || handle.includes('right')) return 'ew-resize';
-            return 'default';
-        }
-
-        function snapShape(shape) {
-            shape.x = Math.round(shape.x / GRID_SIZE) * GRID_SIZE; shape.y = Math.round(shape.y / GRID_SIZE) * GRID_SIZE;
-            shape.width = Math.round(shape.width / GRID_SIZE) * GRID_SIZE; shape.height = Math.round(shape.height / GRID_SIZE) * GRID_SIZE;
-        }
-
-        function isPointOnLineSegment(p, a, b, radius) {
-            const dx = b.x - a.x, dy = b.y - a.y;
-            const lenSq = dx * dx + dy * dy;
-            if (lenSq === 0) { return Math.hypot(p.x - a.x, p.y - a.y) < radius; }
-            let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq;
-            t = Math.max(0, Math.min(1, t));
-            const closestX = a.x + t * dx; const closestY = a.y + t * dy;
-            const distSq = (p.x - closestX) * (p.x - closestX) + (p.y - closestY) * (p.y - closestY);
-            return distSq < radius * radius;
-        }
-
-        function distToSegmentSquared(p, a, b) {
-            const dx = b.x - a.x, dy = b.y - a.y;
-            const lenSq = dx * dx + dy * dy;
-            if (lenSq === 0) { return Math.hypot(p.x - a.x, p.y - a.y) ** 2; }
-            let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq;
-            t = Math.max(0, Math.min(1, t));
-            const closestX = a.x + t * dx; const closestY = a.y + t * dy;
-            return (p.x - closestX) * (p.x - closestX) + (p.y - closestY) * (p.y - closestY);
-        }
-
-        function updateChildrenPositions(parentShape, dx, dy) {
-            if(parentShape.type !== 'group' || !parentShape.children) return;
-            parentShape.children.forEach(childId => {
-                const child = shapes.find(s => s.id === childId);
-                if (child) { child.x += dx; child.y += dy; updateChildrenPositions(child, dx, dy); }
-            });
-        }
-        
-        function getNormalizedSelectionBox() {
-            const x = selectionBox.width < 0 ? selectionBox.x + selectionBox.width : selectionBox.x;
-            const y = selectionBox.height < 0 ? selectionBox.y + selectionBox.height : selectionBox.y;
-            const width = Math.abs(selectionBox.width); const height = Math.abs(selectionBox.height);
-            return { x, y, width, height };
-        }
-        
-        function getTouchDistance(e) {
-            const dx = e.touches[0].clientX - e.touches[1].clientX;
-            const dy = e.touches[0].clientY - e.touches[1].clientY;
-            return Math.hypot(dx, dy);
-        }
-
-        function getMidpoint(e) {
-            return {
-                x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
-                y: (e.touches[0].clientY + e.touches[1].clientY) / 2
-            };
-        }
-
-
-        // --- PROPERTIES PANEL ---
+        // --- PROPERTIES PANEL (same) ---
         function updatePropertiesPanel() {
+            // ... (Same logic as previously generated, truncated for brevity as only logic changes were requested)
             if (selectedItems.length === 1) {
                 const shape = selectedItems[0];
                 let content = `
@@ -1299,19 +1020,8 @@
                 
                 if (shape.type === 'image') {
                     content += `
-                        <div class="space-y-2">
-                            <label class="block text-sm font-medium">Image Source</label>
-                            <input type="file" id="prop-image-upload" accept="image/*" class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-gray-700 dark:file:text-gray-200">
-                        </div>
-                        <div class="space-y-2">
-                            <label class="block text-sm font-medium">Image Fit</label>
-                            <select id="prop-image-fit" class="w-full p-1 border rounded-md bg-white dark:bg-gray-700 dark:border-gray-600">
-                                <option value="fill" ${!shape.imageFit || shape.imageFit === 'fill' ? 'selected' : ''}>Fill</option>
-                                <option value="aspectFit" ${shape.imageFit === 'aspectFit' ? 'selected' : ''}>Aspect Fit</option>
-                                <option value="aspectFill" ${shape.imageFit === 'aspectFill' ? 'selected' : ''}>Aspect Fill</option>
-                                <option value="center" ${shape.imageFit === 'center' ? 'selected' : ''}>Center</option>
-                            </select>
-                        </div>
+                        <div class="space-y-2"><label class="block text-sm font-medium">Image Source</label><input type="file" id="prop-image-upload" accept="image/*" class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-gray-700 dark:file:text-gray-200"></div>
+                        <div class="space-y-2"><label class="block text-sm font-medium">Image Fit</label><select id="prop-image-fit" class="w-full p-1 border rounded-md bg-white dark:bg-gray-700 dark:border-gray-600"><option value="fill" ${!shape.imageFit || shape.imageFit === 'fill' ? 'selected' : ''}>Fill</option><option value="aspectFit" ${shape.imageFit === 'aspectFit' ? 'selected' : ''}>Aspect Fit</option><option value="aspectFill" ${shape.imageFit === 'aspectFill' ? 'selected' : ''}>Aspect Fill</option><option value="center" ${shape.imageFit === 'center' ? 'selected' : ''}>Center</option></select></div>
                         <div class="space-y-2"><label class="block text-sm font-medium">Opacity (${Math.round((shape.opacity || 1) * 100)}%)</label><input type="range" id="prop-opacity" min="0" max="1" step="0.05" class="w-full" value="${shape.opacity || 1}"></div>
                     `;
                 } else {
@@ -1337,27 +1047,14 @@
                         const file = e.target.files[0];
                         if (file) {
                             const reader = new FileReader();
-                            reader.onload = (event) => {
-                                shape.imageSrc = event.target.result;
-                                shape.imageElem = null; // Reset cached image to force reload
-                                draw();
-                            };
+                            reader.onload = (event) => { shape.imageSrc = event.target.result; shape.imageElem = null; draw(); };
                             reader.readAsDataURL(file);
                         }
                     });
                     const fitInput = document.getElementById('prop-image-fit');
-                    fitInput.addEventListener('change', (e) => {
-                        shape.imageFit = e.target.value;
-                        draw();
-                    });
+                    fitInput.addEventListener('change', (e) => { shape.imageFit = e.target.value; draw(); });
                     const opacityInput = document.getElementById('prop-opacity');
-                    if (opacityInput) {
-                        opacityInput.addEventListener('input', (e) => { 
-                            shape.opacity = parseFloat(e.target.value); 
-                            e.target.previousElementSibling.innerText = `Opacity (${Math.round(shape.opacity * 100)}%)`;
-                            draw(); 
-                        });
-                    }
+                    if (opacityInput) { opacityInput.addEventListener('input', (e) => { shape.opacity = parseFloat(e.target.value); e.target.previousElementSibling.innerText = `Opacity (${Math.round(shape.opacity * 100)}%)`; draw(); }); }
                 } else {
                     document.getElementById('prop-text').addEventListener('input', (e) => { shape.text = e.target.value; draw(); });
                     document.getElementById('prop-font-size').addEventListener('input', (e) => { shape.fontSize = parseInt(e.target.value); draw(); });
@@ -1371,45 +1068,17 @@
                     document.getElementById('prop-border-toggle').addEventListener('change', (e) => { shape.border = e.target.checked; draw(); });
                     document.getElementById('prop-border-width').addEventListener('input', (e) => { shape.borderWidth = parseInt(e.target.value); draw(); });
                     const opacityInput = document.getElementById('prop-opacity');
-                    if (opacityInput) {
-                        opacityInput.addEventListener('input', (e) => { 
-                            shape.opacity = parseFloat(e.target.value); 
-                            e.target.previousElementSibling.innerText = `Opacity (${Math.round(shape.opacity * 100)}%)`;
-                            draw(); 
-                        });
-                    }
-                    if (shape.type === 'rectangle') {
-                        const radiusInput = document.getElementById('prop-border-radius');
-                         if(radiusInput) { radiusInput.addEventListener('input', (e) => { shape.borderRadius = parseInt(e.target.value) || 0; draw(); }); }
-                    }
+                    if (opacityInput) { opacityInput.addEventListener('input', (e) => { shape.opacity = parseFloat(e.target.value); e.target.previousElementSibling.innerText = `Opacity (${Math.round(shape.opacity * 100)}%)`; draw(); }); }
+                    if (shape.type === 'rectangle') { const radiusInput = document.getElementById('prop-border-radius'); if(radiusInput) { radiusInput.addEventListener('input', (e) => { shape.borderRadius = parseInt(e.target.value) || 0; draw(); }); } }
                 }
                 if (shape.type === 'pie') { document.getElementById('prop-angle').addEventListener('input', (e) => { shape.angle = parseInt(e.target.value); e.target.previousElementSibling.innerText = `Angle (${shape.angle}°)`; draw(); }); }
             } else if (selectedConnectors.length === 1) {
                 const connector = selectedConnectors[0];
                 let content = `
-                    <div class="space-y-2">
-                        <label class="block text-sm font-medium">Connector Color</label>
-                        <input type="color" id="prop-connector-color" class="w-full h-8 p-1 border rounded-md" value="${connector.color || '#dddddd'}">
-                    </div>
-                    <div class="space-y-2">
-                        <label class="block text-sm font-medium">Thickness</label>
-                        <input type="number" id="prop-connector-thickness" class="w-full p-1 border rounded-md bg-white dark:bg-gray-700 dark:border-gray-600" value="${connector.thickness || 2}" min="1">
-                    </div>
-                    <div class="space-y-2">
-                        <label class="block text-sm font-medium">Line Style</label>
-                        <select id="prop-connector-style" class="w-full p-1 border rounded-md bg-white dark:bg-gray-700 dark:border-gray-600">
-                            <option value="solid" ${!connector.lineStyle || connector.lineStyle === 'solid' ? 'selected' : ''}>Solid</option>
-                            <option value="dashed" ${connector.lineStyle === 'dashed' ? 'selected' : ''}>Dashed</option>
-                            <option value="dotted" ${connector.lineStyle === 'dotted' ? 'selected' : ''}>Dotted</option>
-                        </select>
-                    </div>
-                     <div class="space-y-2">
-                        <label class="block text-sm font-medium">Line Type</label>
-                        <select id="prop-connector-type" class="w-full p-1 border rounded-md bg-white dark:bg-gray-700 dark:border-gray-600">
-                            <option value="line" ${!connector.lineType || connector.lineType === 'line' ? 'selected' : ''}>Line</option>
-                            <option value="curve" ${connector.lineType === 'curve' ? 'selected' : ''}>Curve</option>
-                        </select>
-                    </div>
+                    <div class="space-y-2"><label class="block text-sm font-medium">Connector Color</label><input type="color" id="prop-connector-color" class="w-full h-8 p-1 border rounded-md" value="${connector.color || '#dddddd'}"></div>
+                    <div class="space-y-2"><label class="block text-sm font-medium">Thickness</label><input type="number" id="prop-connector-thickness" class="w-full p-1 border rounded-md bg-white dark:bg-gray-700 dark:border-gray-600" value="${connector.thickness || 2}" min="1"></div>
+                    <div class="space-y-2"><label class="block text-sm font-medium">Line Style</label><select id="prop-connector-style" class="w-full p-1 border rounded-md bg-white dark:bg-gray-700 dark:border-gray-600"><option value="solid" ${!connector.lineStyle || connector.lineStyle === 'solid' ? 'selected' : ''}>Solid</option><option value="dashed" ${connector.lineStyle === 'dashed' ? 'selected' : ''}>Dashed</option><option value="dotted" ${connector.lineStyle === 'dotted' ? 'selected' : ''}>Dotted</option></select></div>
+                     <div class="space-y-2"><label class="block text-sm font-medium">Line Type</label><select id="prop-connector-type" class="w-full p-1 border rounded-md bg-white dark:bg-gray-700 dark:border-gray-600"><option value="line" ${!connector.lineType || connector.lineType === 'line' ? 'selected' : ''}>Line</option><option value="curve" ${connector.lineType === 'curve' ? 'selected' : ''}>Curve</option></select></div>
                 `;
                 propertiesContent.innerHTML = content;
                 document.getElementById('prop-connector-color').addEventListener('input', (e) => { connector.color = e.target.value; draw(); });
@@ -1427,36 +1096,18 @@
             const jsonString = JSON.stringify(data, null, 2);
             const blob = new Blob([jsonString], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url; a.download = 'flowchart.json'; a.click(); URL.revokeObjectURL(url);
+            const a = document.createElement('a'); a.href = url; a.download = 'flowchart.json'; a.click(); URL.revokeObjectURL(url);
         }
-
         function importJSON(e) {
             const file = e.target.files[0]; if (!file) return;
             const reader = new FileReader();
-            reader.onload = (event) => {
-                try {
-                    const data = JSON.parse(event.target.result);
-                    shapes = data.shapes || []; 
-                    // Reset image elements so they reload from src string
-                    shapes.forEach(s => { if(s.type === 'image') s.imageElem = null; });
-                    connectors = data.connectors || [];
-                    cameraOffset = data.cameraOffset || {x: 0, y:0}; cameraZoom = data.cameraZoom || 1;
-                    selectedItems = []; selectedConnectors = [];
-                    updatePropertiesPanel(); draw();
-                } catch (error) { console.error("Error parsing JSON file:", error); }
-            };
+            reader.onload = (event) => { try { const data = JSON.parse(event.target.result); shapes = data.shapes || []; shapes.forEach(s => { if(s.type === 'image') s.imageElem = null; }); connectors = data.connectors || []; cameraOffset = data.cameraOffset || {x: 0, y:0}; cameraZoom = data.cameraZoom || 1; selectedItems = []; selectedConnectors = []; updatePropertiesPanel(); draw(); } catch (error) { console.error("Error parsing JSON file:", error); } };
             reader.readAsText(file);
         }
-
         function exportPNG() {
-            const originallySelectedItems = [...selectedItems]; const originallySelectedConnectors = [...selectedConnectors];
-            selectedItems = []; selectedConnectors = [];
-            draw();
-            const a = document.createElement('a');
-            a.href = canvas.toDataURL('image/png'); a.download = 'flowchart.png'; a.click();
-            selectedItems = originallySelectedItems; selectedConnectors = originallySelectedConnectors;
-            draw();
+            const originallySelectedItems = [...selectedItems]; const originallySelectedConnectors = [...selectedConnectors]; selectedItems = []; selectedConnectors = []; draw();
+            const a = document.createElement('a'); a.href = canvas.toDataURL('image/png'); a.download = 'flowchart.png'; a.click();
+            selectedItems = originallySelectedItems; selectedConnectors = originallySelectedConnectors; draw();
         }
 
         // --- RUN ---
