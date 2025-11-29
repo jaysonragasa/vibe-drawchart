@@ -1,0 +1,154 @@
+
+    function handleMouseMove(e) {
+        const mousePos = getEventPos(e, canvas, state.cameraOffset, state.cameraZoom);
+
+        if (state.isRotating) {
+            const shape = state.selectedItems[0];
+            const centerX = shape.x + shape.width / 2;
+            const centerY = shape.y + shape.height / 2;
+            const angle = Math.atan2(mousePos.y - centerY, mousePos.x - centerX);
+            shape.rotation = angle + Math.PI / 2;
+            draw();
+            return;
+        }
+
+        if (state.isReconnecting) {
+            state.lastMousePos = mousePos;
+            draw();
+            return;
+        }
+
+        if (state.draggedWaypointInfo) {
+            state.draggedWaypointInfo.connector.waypoints[state.draggedWaypointInfo.waypointIndex] = mousePos;
+            draw();
+            return;
+        }
+
+        if (state.isPanning && !state.isMultiTouching) {
+            state.cameraOffset.x += e.clientX - state.panStart.x;
+            state.cameraOffset.y += e.clientY - state.panStart.y;
+            state.panStart = { x: e.clientX, y: e.clientY };
+            draw();
+            return;
+        }
+
+        if (state.isResizing) {
+            const shape = state.selectedItems[0];
+            const dx = mousePos.x - state.startMousePos.x;
+            const dy = mousePos.y - state.startMousePos.y;
+
+            const sin = Math.sin(-(shape.rotation || 0));
+            const cos = Math.cos(-(shape.rotation || 0));
+            const localDx = dx * cos - dy * sin;
+            const localDy = dx * sin + dy * cos;
+
+            let newW = state.startShapeState.w;
+            let newH = state.startShapeState.h;
+            let newX = state.startShapeState.x;
+            let newY = state.startShapeState.y;
+
+            if (state.resizeHandle === 'bottomRight') {
+                newW = state.startShapeState.w + localDx;
+                newH = state.startShapeState.h + localDy;
+                newX = state.startShapeState.x;
+                newY = state.startShapeState.y;
+            } else if (state.resizeHandle === 'bottomLeft') {
+                newW = state.startShapeState.w - localDx;
+                newH = state.startShapeState.h + localDy;
+                newX = (state.startShapeState.x + state.startShapeState.w) - newW;
+                newY = state.startShapeState.y;
+            } else if (state.resizeHandle === 'topRight') {
+                newW = state.startShapeState.w + localDx;
+                newH = state.startShapeState.h - localDy;
+                newX = state.startShapeState.x;
+                newY = (state.startShapeState.y + state.startShapeState.h) - newH;
+            } else if (state.resizeHandle === 'topLeft') {
+                newW = state.startShapeState.w - localDx;
+                newH = state.startShapeState.h - localDy;
+                newX = (state.startShapeState.x + state.startShapeState.w) - newW;
+                newY = (state.startShapeState.y + state.startShapeState.h) - newH;
+            } else {
+                if (state.resizeHandle.includes('right')) newW = state.startShapeState.w + localDx;
+                if (state.resizeHandle.includes('left')) {
+                    newW = state.startShapeState.w - localDx;
+                    newX = state.startShapeState.x + localDx;
+                }
+                if (state.resizeHandle.includes('bottom')) newH = state.startShapeState.h + localDy;
+                if (state.resizeHandle.includes('top')) {
+                    newH = state.startShapeState.h - localDy;
+                    newY = state.startShapeState.y + localDy;
+                }
+            }
+
+            if (['topLeft', 'topRight', 'bottomLeft', 'bottomRight'].includes(state.resizeHandle)) {
+                const r = state.resizeAspectRatio;
+                const refinedH = (newW * r + newH) / (r * r + 1);
+                newW = refinedH * r;
+                newH = refinedH;
+                
+                if (state.resizeHandle === 'bottomRight') {
+                    newX = state.startShapeState.x;
+                    newY = state.startShapeState.y;
+                } else if (state.resizeHandle === 'bottomLeft') {
+                    newX = (state.startShapeState.x + state.startShapeState.w) - newW;
+                    newY = state.startShapeState.y;
+                } else if (state.resizeHandle === 'topRight') {
+                    newX = state.startShapeState.x;
+                    newY = (state.startShapeState.y + state.startShapeState.h) - newH;
+                } else if (state.resizeHandle === 'topLeft') {
+                    newX = (state.startShapeState.x + state.startShapeState.w) - newW;
+                    newY = (state.startShapeState.y + state.startShapeState.h) - newH;
+                }
+            }
+
+            if (newW < 20) newW = 20;
+            if (newH < 20) newH = 20;
+
+            shape.width = newW;
+            shape.height = newH;
+            shape.x = newX;
+            shape.y = newY;
+
+            if (state.snapToGrid) snapShape(shape, config.GRID_SIZE);
+            draw();
+        } else if (state.isDragging) {
+            const dx = mousePos.x - state.lastMousePos.x;
+            const dy = mousePos.y - state.lastMousePos.y;
+            state.selectedItems.forEach(shape => {
+                shape.x += dx;
+                shape.y += dy;
+                updateChildrenPositions(shape, dx, dy, state.shapes);
+            });
+            state.lastMousePos = mousePos;
+            draw();
+        } else if (state.isConnecting) {
+            state.currentConnector.to = { x: mousePos.x, y: mousePos.y };
+            draw();
+        } else if (state.isSelecting) {
+            state.selectionBox.width = mousePos.x - state.selectionBox.x;
+            state.selectionBox.height = mousePos.y - state.selectionBox.y;
+            draw();
+        } else {
+            const prevHovered = state.hoveredConnector;
+            state.hoveredConnector = getConnectorAt(mousePos, state.connectors, state.shapes, state.cameraZoom);
+            if (prevHovered !== state.hoveredConnector) draw();
+            
+            if (state.selectedItems.length === 1) {
+                const shape = state.selectedItems[0];
+                if (getRotationHandleAt(mousePos, shape, state.cameraZoom)) {
+                    canvas.style.cursor = 'crosshair';
+                    return;
+                }
+                const handle = getResizeHandleAt(mousePos, shape, state.cameraZoom);
+                if (handle) {
+                    canvas.style.cursor = getResizeCursor(handle, shape.rotation || 0);
+                    return;
+                }
+                if (getConnectionPointAt(mousePos, shape, state.cameraZoom)) {
+                    canvas.style.cursor = 'crosshair';
+                    return;
+                }
+            }
+            canvas.style.cursor = state.hoveredConnector ? 'pointer' : (getShapeAt(mousePos, state.shapes) ? 'move' : 'default');
+        }
+    }
